@@ -1,0 +1,12 @@
+input:
+  period: 10
+  device: wlp2s0
+  targets:
+    google:
+      - google.com.au
+      - google.com
+    "misc hosts":
+      - astralcars.com
+      - passpack.com
+    elastic:
+      - elastic.co
