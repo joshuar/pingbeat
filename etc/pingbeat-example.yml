@@ -9,15 +9,10 @@ input:
   privileged: true
   targets:
 
-    # List targets under the tag you want assigned to them
+    # List targets under the tag you want assigned to
     google:
       - google.com.au
       - google.com
-    "misc hosts":
-      - astralcars.com
-      - passpack.com
-    elastic:
-      - elastic.co
 
 ############################# Output ############################################
 
