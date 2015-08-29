@@ -34,6 +34,12 @@ output:
     hosts: ["localhost:9200"]
     save_topology: false
 
+    # Optional index name. The default is packetbeat and generates
+    # [pingbeat-]YYYY.MM.DD keys.
+    index: "pingbeat"
+    # Optional HTTP Path
+    # path: "/elasticsearch"
+
   # Redis as output
   # Options:
   # host, port: where Redis is listening on

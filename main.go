@@ -50,22 +50,20 @@ func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
 	} else {
 		p.pingType = "udp"
 	}
+	logp.Debug("pingbeat", "Using %v for pings\n", p.pingType)
 
-	if config.UseIPv4 != nil && *config.UseIPv4 == true {
-		p.useIPv4 = true
+	p.useIPv4 = true
+	p.useIPv6 = false
+	if config.UseIPv4 != nil && *config.UseIPv4 == false {
+		p.useIPv4 = false
 	}
 	if config.UseIPv6 != nil && *config.UseIPv6 == true {
 		p.useIPv6 = true
 	}
-
-	// default to just useIPv4
-	if config.UseIPv4 == nil && config.UseIPv6 == nil {
-		p.useIPv4 = true
-	}
+	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
 
 	if config.Targets != nil {
 		for tag, targets := range *config.Targets {
-			logp.Debug("pingbeat", "Tag: %s\n", tag)
 			for i := 0; i < len(targets); i++ {
 				thisTarget := &Target{}
 				thisTarget.Init(targets[i], tag)
@@ -105,19 +103,24 @@ func (p *Pingbeat) Run() error {
 
 	errInput, err := fp.Network(p.pingType)
 	if err != nil {
-		logp.Err("pingbeat", "Error: %v (input %v)", err, errInput)
+		logp.Critical("Error: %v (input %v)", err, errInput)
+		os.Exit(1)
 	}
 
 	details := make(map[string][2]string)
 
 	for _, target := range p.targets {
-		for i := 0; i < len(target.ipv4Addrs); i++ {
-			fp.AddIP(target.ipv4Addrs[i].String())
-			details[target.ipv4Addrs[i].String()] = [2]string{target.name, target.tag}
+		if p.useIPv4 {
+			for i := 0; i < len(target.ipv4Addrs); i++ {
+				fp.AddIP(target.ipv4Addrs[i].String())
+				details[target.ipv4Addrs[i].String()] = [2]string{target.name, target.tag}
+			}
 		}
-		for i := 0; i < len(target.ipv6Addrs); i++ {
-			fp.AddIP(target.ipv6Addrs[i].String())
-			details[target.ipv6Addrs[i].String()] = [2]string{target.name, target.tag}
+		if p.useIPv6 {
+			for i := 0; i < len(target.ipv6Addrs); i++ {
+				fp.AddIP(target.ipv6Addrs[i].String())
+				details[target.ipv6Addrs[i].String()] = [2]string{target.name, target.tag}
+			}
 		}
 	}
 	fp.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
@@ -140,7 +143,7 @@ func (p *Pingbeat) Run() error {
 		time.Sleep(p.period)
 		err := fp.Run()
 		if err != nil {
-			fmt.Println(err)
+			logp.Warn("Warning: %v", err)
 		}
 	}
 
