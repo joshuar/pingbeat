@@ -1,16 +1,13 @@
 package main
 
 import (
+	// "github.com/davecgh/go-spew/spew"
 	"flag"
 	"fmt"
-	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/libbeat/cfgfile"
-	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
 	"github.com/elastic/libbeat/publisher"
 	"github.com/elastic/libbeat/service"
-	"github.com/tatsushid/go-fastping"
-	"net"
 	"os"
 	"runtime"
 	"time"
@@ -18,141 +15,6 @@ import (
 
 var Version = "0.0.1-alpha1"
 var Name = "pingbeat"
-
-type Pingbeat struct {
-	isAlive  bool
-	useIPv4  bool
-	useIPv6  bool
-	period   time.Duration
-	pingType string
-	targets  []Target
-	events   chan common.MapStr
-}
-
-type Target struct {
-	name      string
-	tag       string
-	ipv4Addrs []net.IPAddr
-	ipv6Addrs []net.IPAddr
-}
-
-func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
-
-	if config.Period != nil {
-		p.period = time.Duration(*config.Period) * time.Second
-	} else {
-		p.period = 1 * time.Second
-	}
-	logp.Debug("pingbeat", "Period %v\n", p.period)
-
-	if *config.Privileged {
-		p.pingType = "ip"
-	} else {
-		p.pingType = "udp"
-	}
-	logp.Debug("pingbeat", "Using %v for pings\n", p.pingType)
-
-	p.useIPv4 = true
-	p.useIPv6 = false
-	if config.UseIPv4 != nil && *config.UseIPv4 == false {
-		p.useIPv4 = false
-	}
-	if config.UseIPv6 != nil && *config.UseIPv6 == true {
-		p.useIPv6 = true
-	}
-	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
-
-	if config.Targets != nil {
-		for tag, targets := range *config.Targets {
-			for i := 0; i < len(targets); i++ {
-				thisTarget := &Target{}
-				thisTarget.Init(targets[i], tag)
-				p.targets = append(p.targets, *thisTarget)
-			}
-		}
-	}
-
-	p.events = events
-	return nil
-}
-
-func (t *Target) Init(name string, tag string) {
-	t.name = name
-	t.tag = tag
-	logp.Debug("pingbeat", "Getting IP addresses for %s:\n", t.name)
-	addrs, err := net.LookupIP(t.name)
-	if err != nil {
-		logp.Err("pingbeat", "Failed to resolve %s to IP address\n", t.name)
-	}
-	for j := 0; j < len(addrs); j++ {
-		if addrs[j].To4() != nil {
-			logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
-			t.ipv4Addrs = append(t.ipv4Addrs, net.IPAddr{IP: addrs[j]})
-		} else {
-			logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
-			t.ipv6Addrs = append(t.ipv6Addrs, net.IPAddr{IP: addrs[j]})
-		}
-	}
-}
-
-func (p *Pingbeat) Run() error {
-
-	p.isAlive = true
-
-	fp := fastping.NewPinger()
-
-	errInput, err := fp.Network(p.pingType)
-	if err != nil {
-		logp.Critical("Error: %v (input %v)", err, errInput)
-		os.Exit(1)
-	}
-
-	details := make(map[string][2]string)
-
-	for _, target := range p.targets {
-		if p.useIPv4 {
-			for i := 0; i < len(target.ipv4Addrs); i++ {
-				fp.AddIP(target.ipv4Addrs[i].String())
-				details[target.ipv4Addrs[i].String()] = [2]string{target.name, target.tag}
-			}
-		}
-		if p.useIPv6 {
-			for i := 0; i < len(target.ipv6Addrs); i++ {
-				fp.AddIP(target.ipv6Addrs[i].String())
-				details[target.ipv6Addrs[i].String()] = [2]string{target.name, target.tag}
-			}
-		}
-	}
-	fp.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
-		name := details[addr.String()][0]
-		tag := details[addr.String()][1]
-		event := common.MapStr{
-			"timestamp":   common.Time(time.Now()),
-			"type":        "pingbeat",
-			"target_name": name,
-			"target_addr": addr.String(),
-			"tag":         tag,
-			"rtt":         milliSeconds(rtt),
-		}
-		p.events <- event
-	}
-	// fp.OnIdle = func() {
-	// 	fmt.Println("loop done")
-	// }
-	for p.isAlive {
-		time.Sleep(p.period)
-		err := fp.Run()
-		if err != nil {
-			logp.Warn("Warning: %v", err)
-		}
-	}
-
-	return nil
-}
-
-func (p *Pingbeat) Stop() {
-	p.isAlive = false
-}
 
 func milliSeconds(d time.Duration) float64 {
 	msec := d / time.Millisecond
