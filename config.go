@@ -7,11 +7,11 @@ import (
 )
 
 type PingConfig struct {
-	Period  *int64
-	UseIPv4 *bool
-	UseIPv6 *bool
-	Device  *string
-	Targets *map[string][]string
+	Period     *int64
+	UseIPv4    *bool
+	UseIPv6    *bool
+	Privileged *bool
+	Targets    *map[string][]string
 }
 
 type ConfigSettings struct {
