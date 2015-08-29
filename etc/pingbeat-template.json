@@ -31,7 +31,7 @@
                 }
             }
         }
-    }
+    },
     "settings": {
         "index.refresh_interval": "10s"
     },
