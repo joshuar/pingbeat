@@ -18,9 +18,16 @@ github.com/joshuar/pingbeat`
 
 ## Usage
 
-See the [example configuration file](etc/pingbeat.yml) for configuring
+See the [example configuration file](etc/pingbeat-example.yml) for configuring
 your targets and assigning an output (default output is
-Elasticsearch). Once you've created a configuration file you can run
+Elasticsearch).
+
+If using the Elasticsearch output, you should add a
+new index template using the
+[supplied one](etc/pingbeat-template.json), for example with `curl
+-XPUT  /_template/pingbeat -d @/path/to/pingbeat-template.json`.
+
+Once you've created a configuration file you can run
 pingbeat with `pingbeat -c /path/to/pingbeat.yml`.
 
 ### Note on privileges
@@ -34,4 +41,4 @@ ping` to test connectivity.
 
 ## License
 
-pingbeat is licensed under the Apache 2.0 [license](LICENSE.md).
+pingbeat is licensed under the Apache 2.0 [license](LICENSE).
