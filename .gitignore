@@ -1,3 +1,4 @@
 pingbeat
 *.tmp
 etc/pingbeat.yml
+.~lock*
