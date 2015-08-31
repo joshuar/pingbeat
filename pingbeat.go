@@ -76,15 +76,15 @@ func (p *Pingbeat) Run() error {
 
 	for _, target := range p.targets {
 		if p.useIPv4 {
-			logp.Debug("pingbeat", "In IPv4 Loop\n")
 			for i := 0; i < len(target.ipv4Addrs); i++ {
+				logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", target.ipv4Addrs[i].String(), target.name, target.tag)
 				fp.AddIP(target.ipv4Addrs[i].String())
 				details[target.ipv4Addrs[i].String()] = [2]string{target.name, target.tag}
 			}
 		}
 		if p.useIPv6 {
-			logp.Debug("pingbeat", "In IPv6 Loop\n")
 			for i := 0; i < len(target.ipv6Addrs); i++ {
+				logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", target.ipv4Addrs[i].String(), target.name, target.tag)
 				fp.AddIP(target.ipv6Addrs[i].String())
 				details[target.ipv6Addrs[i].String()] = [2]string{target.name, target.tag}
 			}
