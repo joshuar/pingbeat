@@ -30,6 +30,7 @@ func main() {
 	cfgfile.CmdLineFlags(cmdLine, Name)
 	logp.CmdLineFlags(cmdLine)
 	service.CmdLineFlags(cmdLine)
+	publisher.CmdLineFlags(cmdLine)
 
 	printVersion := cmdLine.Bool("version", false, "Print version and exit")
 
@@ -45,9 +46,7 @@ func main() {
 	logp.Init(Name, &Config.Logging)
 
 	logp.Debug("main", "Initializing output plugins")
-	if err = publisher.Publisher.Init(Name, Config.Output,
-		Config.Shipper); err != nil {
-
+	if err = publisher.Publisher.Init(Name, Config.Output, Config.Shipper); err != nil {
 		logp.Critical(err.Error())
 		os.Exit(1)
 	}
