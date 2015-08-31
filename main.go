@@ -31,7 +31,6 @@ func main() {
 	logp.CmdLineFlags(cmdLine)
 	service.CmdLineFlags(cmdLine)
 
-	publishDisabled := cmdLine.Bool("N", false, "Disable actual publishing for testing")
 	printVersion := cmdLine.Bool("version", false, "Print version and exit")
 
 	cmdLine.Parse(os.Args[1:])
@@ -46,7 +45,7 @@ func main() {
 	logp.Init(Name, &Config.Logging)
 
 	logp.Debug("main", "Initializing output plugins")
-	if err = publisher.Publisher.Init(*publishDisabled, Config.Output,
+	if err = publisher.Publisher.Init(Name, Config.Output,
 		Config.Shipper); err != nil {
 
 		logp.Critical(err.Error())
