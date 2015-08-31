@@ -18,15 +18,16 @@ func (t *Target) Init(name string, tag string) {
 	logp.Debug("target", "Getting IP addresses for %s:\n", t.name)
 	addrs, err := net.LookupIP(t.name)
 	if err != nil {
-		logp.Err("target", "Failed to resolve %s to IP address\n", t.name)
-	}
-	for j := 0; j < len(addrs); j++ {
-		if addrs[j].To4() != nil {
-			logp.Debug("target", "IPv4: %s\n", addrs[j].String())
-			t.ipv4Addrs = append(t.ipv4Addrs, net.IPAddr{IP: addrs[j]})
-		} else {
-			logp.Debug("target", "IPv6: %s\n", addrs[j].String())
-			t.ipv6Addrs = append(t.ipv6Addrs, net.IPAddr{IP: addrs[j]})
+		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", t.name)
+	} else {
+		for j := 0; j < len(addrs); j++ {
+			if addrs[j].To4() != nil {
+				logp.Debug("target", "IPv4: %s\n", addrs[j].String())
+				t.ipv4Addrs = append(t.ipv4Addrs, net.IPAddr{IP: addrs[j]})
+			} else {
+				logp.Debug("target", "IPv6: %s\n", addrs[j].String())
+				t.ipv6Addrs = append(t.ipv6Addrs, net.IPAddr{IP: addrs[j]})
+			}
 		}
 	}
 }
