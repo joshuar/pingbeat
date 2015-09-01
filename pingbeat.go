@@ -11,13 +11,14 @@ import (
 )
 
 type Pingbeat struct {
-	isAlive  bool
-	useIPv4  bool
-	useIPv6  bool
-	period   time.Duration
-	pingType string
-	targets  []Target
-	events   chan common.MapStr
+	isAlive     bool
+	useIPv4     bool
+	useIPv6     bool
+	period      time.Duration
+	pingType    string
+	ipv4targets map[string][2]string
+	ipv6targets map[string][2]string
+	events      chan common.MapStr
 }
 
 func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
@@ -46,12 +47,26 @@ func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
 	}
 	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
 
+	p.ipv4targets = make(map[string][2]string)
+	p.ipv6targets = make(map[string][2]string)
 	if config.Targets != nil {
 		for tag, targets := range *config.Targets {
 			for i := 0; i < len(targets); i++ {
-				thisTarget := &Target{}
-				thisTarget.Init(targets[i], tag)
-				p.targets = append(p.targets, *thisTarget)
+				logp.Debug("pingbeat", "Getting IP addresses for %s:\n", targets[i])
+				addrs, err := net.LookupIP(targets[i])
+				if err != nil {
+					logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", targets[i])
+				} else {
+					for j := 0; j < len(addrs); j++ {
+						if addrs[j].To4() != nil {
+							logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
+							p.ipv4targets[addrs[j].String()] = [2]string{targets[i], tag}
+						} else {
+							logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
+							p.ipv6targets[addrs[j].String()] = [2]string{targets[i], tag}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -72,27 +87,28 @@ func (p *Pingbeat) Run() error {
 		os.Exit(1)
 	}
 
-	details := make(map[string][2]string)
-
-	for _, target := range p.targets {
-		if p.useIPv4 {
-			for i := 0; i < len(target.ipv4Addrs); i++ {
-				logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", target.ipv4Addrs[i].String(), target.name, target.tag)
-				fp.AddIP(target.ipv4Addrs[i].String())
-				details[target.ipv4Addrs[i].String()] = [2]string{target.name, target.tag}
-			}
+	if p.useIPv4 {
+		for addr, details := range p.ipv4targets {
+			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+			fp.AddIP(addr)
 		}
-		if p.useIPv6 {
-			for i := 0; i < len(target.ipv6Addrs); i++ {
-				logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", target.ipv4Addrs[i].String(), target.name, target.tag)
-				fp.AddIP(target.ipv6Addrs[i].String())
-				details[target.ipv6Addrs[i].String()] = [2]string{target.name, target.tag}
-			}
+	}
+	if p.useIPv6 {
+		for addr, details := range p.ipv6targets {
+			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+			fp.AddIP(addr)
 		}
 	}
 	fp.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
-		name := details[addr.String()][0]
-		tag := details[addr.String()][1]
+		var name, tag string
+		ip := addr.IP
+		if ip.To4() != nil {
+			name = p.ipv4targets[addr.String()][0]
+			tag = p.ipv4targets[addr.String()][1]
+		} else {
+			name = p.ipv6targets[addr.String()][0]
+			tag = p.ipv6targets[addr.String()][1]
+		}
 		event := common.MapStr{
 			"timestamp":   common.Time(time.Now()),
 			"type":        "pingbeat",
