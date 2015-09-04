@@ -4,12 +4,17 @@
 input:
 
   # Loop every 10 seconds
-  # Don't use privileged (i.e raw sockets) for ping
   period: 10
+  # Use raw sockets for ping
+  # Requires root!
   privileged: true
-  targets:
+  # Whether to perform IPv4/v6 pings
+  useipv4: true
+  useipv6: false
 
-    # List targets under the tag you want assigned to
+  # List targets under the tag you want assigned to
+  targets:
+    # tag: google
     google:
       - google.com.au
       - google.com

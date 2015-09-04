@@ -2,8 +2,11 @@ package main
 
 import (
 	// "github.com/davecgh/go-spew/spew"
+	"github.com/elastic/libbeat/beat"
+	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/publisher"
 	"github.com/tatsushid/go-fastping"
 	"net"
 	"os"
@@ -18,39 +21,54 @@ type Pingbeat struct {
 	pingType    string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
+	config      ConfigSettings
 	events      chan common.MapStr
 }
 
-func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
+func milliSeconds(d time.Duration) float64 {
+	msec := d / time.Millisecond
+	nsec := d % time.Millisecond
+	return float64(msec) + float64(nsec)*1e-6
+}
 
-	if config.Period != nil {
-		p.period = time.Duration(*config.Period) * time.Second
+func (p *Pingbeat) Config(b *beat.Beat) error {
+
+	err := cfgfile.Read(&p.config)
+	if err != nil {
+		logp.Err("Error reading configuration file: %v", err)
+		return err
+	}
+
+	if p.config.Input.Period != nil {
+		p.period = time.Duration(*p.config.Input.Period) * time.Second
 	} else {
 		p.period = 1 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
 
-	if *config.Privileged {
+	if *p.config.Input.Privileged {
 		p.pingType = "ip"
 	} else {
 		p.pingType = "udp"
 	}
 	logp.Debug("pingbeat", "Using %v for pings\n", p.pingType)
 
-	p.useIPv4 = true
-	p.useIPv6 = false
-	if config.UseIPv4 != nil && *config.UseIPv4 == false {
-		p.useIPv4 = false
+	if &p.config.Input.UseIPv4 != nil {
+		p.useIPv4 = *p.config.Input.UseIPv4
+	} else {
+		p.useIPv4 = true
 	}
-	if config.UseIPv6 != nil && *config.UseIPv6 == true {
-		p.useIPv6 = true
+	if &p.config.Input.UseIPv6 != nil {
+		p.useIPv6 = *p.config.Input.UseIPv6
+	} else {
+		p.useIPv6 = false
 	}
 	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
 
 	p.ipv4targets = make(map[string][2]string)
 	p.ipv6targets = make(map[string][2]string)
-	if config.Targets != nil {
-		for tag, targets := range *config.Targets {
+	if p.config.Input.Targets != nil {
+		for tag, targets := range *p.config.Input.Targets {
 			for i := 0; i < len(targets); i++ {
 				logp.Debug("pingbeat", "Getting IP addresses for %s:\n", targets[i])
 				addrs, err := net.LookupIP(targets[i])
@@ -69,13 +87,21 @@ func (p *Pingbeat) Init(config PingConfig, events chan common.MapStr) error {
 				}
 			}
 		}
+	} else {
+		logp.Critical("Error: no targets specified, cannot continue!")
+		os.Exit(1)
 	}
 
-	p.events = events
 	return nil
 }
 
-func (p *Pingbeat) Run() error {
+func (p *Pingbeat) Setup(b *beat.Beat) error {
+
+	p.events = publisher.Publisher.Queue
+	return nil
+}
+
+func (p *Pingbeat) Run(b *beat.Beat) error {
 
 	p.isAlive = true
 
@@ -130,6 +156,10 @@ func (p *Pingbeat) Run() error {
 		}
 	}
 
+	return nil
+}
+
+func (p *Pingbeat) Cleanup(b *beat.Beat) error {
 	return nil
 }
 
