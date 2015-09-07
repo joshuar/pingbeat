@@ -26,9 +26,42 @@ type Pingbeat struct {
 }
 
 func milliSeconds(d time.Duration) float64 {
+
 	msec := d / time.Millisecond
 	nsec := d % time.Millisecond
 	return float64(msec) + float64(nsec)*1e-6
+
+}
+
+func (p *Pingbeat) AddTarget(target string, tag string) {
+
+	addr := net.ParseIP(target)
+	if addr != nil {
+		if addr.To4() != nil {
+			logp.Debug("pingbeat", "IPv4: %s\n", addr.String())
+			p.ipv4targets[addr.String()] = [2]string{target, tag}
+		} else {
+			logp.Debug("pingbeat", "IPv6: %s\n", addr.String())
+			p.ipv6targets[addr.String()] = [2]string{target, tag}
+		}
+	} else {
+		logp.Debug("pingbeat", "Getting IP addresses for %s:\n", target)
+		addrs, err := net.LookupIP(target)
+		if err != nil {
+			logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
+		} else {
+			for j := 0; j < len(addrs); j++ {
+				if addrs[j].To4() != nil {
+					logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
+					p.ipv4targets[addrs[j].String()] = [2]string{target, tag}
+				} else {
+					logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
+					p.ipv6targets[addrs[j].String()] = [2]string{target, tag}
+				}
+			}
+		}
+	}
+
 }
 
 func (p *Pingbeat) Config(b *beat.Beat) error {
@@ -70,21 +103,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	if p.config.Input.Targets != nil {
 		for tag, targets := range *p.config.Input.Targets {
 			for i := 0; i < len(targets); i++ {
-				logp.Debug("pingbeat", "Getting IP addresses for %s:\n", targets[i])
-				addrs, err := net.LookupIP(targets[i])
-				if err != nil {
-					logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", targets[i])
-				} else {
-					for j := 0; j < len(addrs); j++ {
-						if addrs[j].To4() != nil {
-							logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
-							p.ipv4targets[addrs[j].String()] = [2]string{targets[i], tag}
-						} else {
-							logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
-							p.ipv6targets[addrs[j].String()] = [2]string{targets[i], tag}
-						}
-					}
-				}
+				p.AddTarget(targets[i], tag)
 			}
 		}
 	} else {
@@ -93,6 +112,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 
 	return nil
+
 }
 
 func (p *Pingbeat) Setup(b *beat.Beat) error {

@@ -4,7 +4,7 @@ import (
 	"github.com/elastic/libbeat/beat"
 )
 
-var Version = "0.0.1-alpha1"
+var Version = "0.0.1-alpha2"
 var Name = "pingbeat"
 
 func main() {
