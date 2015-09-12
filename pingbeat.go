@@ -66,7 +66,7 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 
 func (p *Pingbeat) Config(b *beat.Beat) error {
 
-	err := cfgfile.Read(&p.config)
+	err := cfgfile.Read(&p.config, "")
 	if err != nil {
 		logp.Err("Error reading configuration file: %v", err)
 		return err

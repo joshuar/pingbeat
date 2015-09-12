@@ -1,0 +1,13 @@
+== Overview
+
+Pingbeat is a simple, lighweight utility to ping a list of target
+hosts and write the results to Elasticsearch or another output
+supported by elastic/libbeat. It supports IPv4 and IPv6 and can send ICMP (raw
+socket) or UDP pings.  It uses the tatsushid/go-fastping library to
+bulk send pings to targets.
+
+You can configure an interval on which to ping targets, whether to
+send ICMP or UDP pings and optionally choose IPv4 or IPv6
+support. Pingbeat will resolve hostnames using the system's resolver,
+looking up and adding all DNS A/AAAA records for a given hostname as target
+IP addresses to send ping packets to.

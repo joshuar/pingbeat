@@ -1,0 +1,78 @@
+[[pingbeat-getting-started]]
+== Getting started
+
+[[pingbeat-configuration]]
+=== Pingbeat configuration
+
+Before starting Pingbeat, you'll need to edit the `pingbeat.yml`
+configuration file and add your targets and change any configuration
+options as described below.
+
+[source, shell]
+-------------------------------------
+input:
+  period: 10
+  privileged: true
+  useipv4: true
+  useipv6: false
+  targets:
+    tag:
+      - some.host
+      - other.host
+      - 1.2.3.4
+-------------------------------------
+
+`period` defines how often to send ping packets to all targets.
+
+`privileged` defines whether to use ICMP (raw socket) packets (`true`)
+or UDP packets (`false`). With `privileged: true`, Pingbeat will
+require root/superuser privileges as only a user with these
+permissions can open raw sockets.
+
+`useipv4/useipv6` defines whether to send IPv4/v6 pings.  Toggle these
+depending on your network configuration.
+
+The target list is defined in a hierarchy under the `targets` key,
+listing a group of hosts under a specific `tag`.  The tag will be
+added to each ping response event recorded in the output.  A tag is
+currently mandatory.
+
+Before starting Pingbeat, you need to load the
+http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/indices-templates.html[index
+template], which is used to let Elasticsearch know which fields should be analyzed
+in which way.
+
+The recommended template file is available with the Pingbeat source. Load it with the
+following command:
+
+[source,shell]
+----------------------------------------------------------------------
+curl -XPUT 'http://localhost:9200/_template/pingbeat' -d@/path/to/pingbeat-template.json
+----------------------------------------------------------------------
+
+// The recommended template file is installed by the Pingbeat packages. Load it with the
+// following command:
+
+// deb or rpm:
+
+// [source,shell]
+// ----------------------------------------------------------------------
+// curl -XPUT 'http://localhost:9200/_template/pingbeat' -d@/etc/pingbeat/pingbeat.template.json
+// ----------------------------------------------------------------------
+
+// mac:
+
+// [source,shell]
+// ----------------------------------------------------------------------
+// cd pingbeat-$PB_VERSION-darwin
+// curl -XPUT 'http://localhost:9200/_template/pingbeat' -d@pingbeat.template.json
+// ----------------------------------------------------------------------
+
+// where `localhost:9200` is the IP and port where Elasticsearch is listening on.
+
+You are now ready to start Pingbeat:
+
+[source,shell]
+----------------------------------------------------------------------
+sudo ./pingbeat -e -c /path/to/pingbeat.yml -d "publish"
+----------------------------------------------------------------------
