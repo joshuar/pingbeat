@@ -2,12 +2,12 @@ package main
 
 import (
 	// "github.com/davecgh/go-spew/spew"
-	"github.com/elastic/libbeat/beat"
-	"github.com/elastic/libbeat/cfgfile"
-	"github.com/elastic/libbeat/common"
-	"github.com/elastic/libbeat/logp"
-	"github.com/elastic/libbeat/publisher"
-	"github.com/tatsushid/go-fastping"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/beat"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/cfgfile"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/publisher"
+	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/tatsushid/go-fastping"
 	"net"
 	"os"
 	"time"
@@ -22,19 +22,17 @@ type Pingbeat struct {
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
 	config      ConfigSettings
-	events      chan common.MapStr
+	Beat        *beat.Beat
+	events      publisher.Client
 }
 
 func milliSeconds(d time.Duration) float64 {
-
 	msec := d / time.Millisecond
 	nsec := d % time.Millisecond
 	return float64(msec) + float64(nsec)*1e-6
-
 }
 
 func (p *Pingbeat) AddTarget(target string, tag string) {
-
 	addr := net.ParseIP(target)
 	if addr != nil {
 		if addr.To4() != nil {
@@ -61,11 +59,9 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 			}
 		}
 	}
-
 }
 
 func (p *Pingbeat) Config(b *beat.Beat) error {
-
 	err := cfgfile.Read(&p.config, "")
 	if err != nil {
 		logp.Err("Error reading configuration file: %v", err)
@@ -112,17 +108,14 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 
 	return nil
-
 }
 
 func (p *Pingbeat) Setup(b *beat.Beat) error {
-
-	p.events = publisher.Publisher.Queue
+	p.Beat = b
 	return nil
 }
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
-
 	p.isAlive = true
 
 	fp := fastping.NewPinger()
@@ -163,7 +156,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			"tag":         tag,
 			"rtt":         milliSeconds(rtt),
 		}
-		p.events <- event
+		p.events.PublishEvent(event)
 	}
 	// fp.OnIdle = func() {
 	// 	fmt.Println("loop done")

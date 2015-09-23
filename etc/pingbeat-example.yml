@@ -34,7 +34,7 @@ shipper:
 
 ############################# Output ############################################
 
-# Configure what outputs to use when sending the data collected by topbeat.
+# Configure what outputs to use when sending the data collected by pingbeat.
 # You can enable one or multiple outputs by setting enabled option to true.
 output:
 
@@ -71,7 +71,7 @@ output:
   # number of files: maximum number of files in path
   #file:
     #  enabled: true
-    #  path: "/tmp/topbeat"
-    #  filename: topbeat
+    #  path: "/tmp/pingbeat"
+    #  filename: pingbeat
     #  rotate_every_kb: 1000
     #  number_of_files: 7
