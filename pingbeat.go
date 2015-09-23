@@ -22,7 +22,6 @@ type Pingbeat struct {
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
 	config      ConfigSettings
-	Beat        *beat.Beat
 	events      publisher.Client
 }
 
@@ -111,7 +110,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 }
 
 func (p *Pingbeat) Setup(b *beat.Beat) error {
-	p.Beat = b
+	p.events = b.Events
 	return nil
 }
 
