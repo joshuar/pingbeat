@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/logp"
 )
 
 type Elasticsearch struct {
@@ -44,6 +44,11 @@ type Hits struct {
 	Hits  []json.RawMessage `json:"hits"`
 }
 
+type CountResults struct {
+	Count  int             `json:"count"`
+	Shards json.RawMessage `json:"_shards"`
+}
+
 func (r QueryResult) String() string {
 	out, err := json.Marshal(r)
 	if err != nil {
@@ -62,24 +67,15 @@ func NewElasticsearch(
 	tls *tls.Config,
 	username, password string,
 ) *Elasticsearch {
-
 	var pool ConnectionPool
 	_ = pool.SetConnections(urls, username, password) // never errors
 
-	if tls != nil {
-		return &Elasticsearch{
-			connectionPool: pool,
-			client: &http.Client{
-				Transport: &http.Transport{TLSClientConfig: tls},
-			},
-			MaxRetries: defaultMaxRetries,
-		}
-	}
-
 	return &Elasticsearch{
 		connectionPool: pool,
-		client:         &http.Client{},
-		MaxRetries:     defaultMaxRetries,
+		client: &http.Client{
+			Transport: &http.Transport{TLSClientConfig: tls},
+		},
+		MaxRetries: defaultMaxRetries,
 	}
 }
 
@@ -136,6 +132,19 @@ func readSearchResult(obj []byte) (*SearchResults, error) {
 	if obj == nil {
 		return nil, nil
 	}
+	err := json.Unmarshal(obj, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, err
+}
+
+func readCountResult(obj []byte) (*CountResults, error) {
+	if obj == nil {
+		return nil, nil
+	}
+
+	var result CountResults
 	err := json.Unmarshal(obj, &result)
 	if err != nil {
 		return nil, err
@@ -335,7 +344,7 @@ func (es *Elasticsearch) Delete(index string, docType string, id string, params 
 
 // A search request can be executed purely using a URI by providing request parameters.
 // Implements: http://www.elastic.co/guide/en/elasticsearch/reference/current/search-uri-request.html
-func (es *Elasticsearch) searchURI(index string, docType string, params map[string]string) (*SearchResults, error) {
+func (es *Elasticsearch) SearchURI(index string, docType string, params map[string]string) (*SearchResults, error) {
 
 	path, err := makePath(index, docType, "_search")
 	if err != nil {
@@ -347,4 +356,21 @@ func (es *Elasticsearch) searchURI(index string, docType string, params map[stri
 		return nil, err
 	}
 	return readSearchResult(resp)
+}
+
+func (es *Elasticsearch) CountSearchURI(
+	index string, docType string,
+	params map[string]string,
+) (*CountResults, error) {
+	path, err := makePath(index, docType, "_count")
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := es.request("GET", path, params, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return readCountResult(resp)
 }

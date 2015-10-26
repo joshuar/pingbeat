@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/publisher"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/outputs"
+	"github.com/elastic/libbeat/publisher"
 )
 
 type PingConfig struct {

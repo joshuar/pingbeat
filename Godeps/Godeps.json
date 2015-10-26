@@ -1,41 +1,41 @@
 {
 	"ImportPath": "github.com/joshuar/pingbeat",
-	"GoVersion": "go1.4.2",
+	"GoVersion": "go1.5.1",
 	"Deps": [
 		{
 			"ImportPath": "github.com/elastic/libbeat/beat",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/cfgfile",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/common",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/logp",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/outputs",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/publisher",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/elastic/libbeat/service",
-			"Comment": "v1.0.0-beta3-90-gb4cc3ae",
-			"Rev": "b4cc3aec923a0aad2c53887ab6a305f6c862f619"
+			"Comment": "v1.0.0-beta4-5-g31febfe",
+			"Rev": "31febfe32a45615131ee746e6d6389268f741f67"
 		},
 		{
 			"ImportPath": "github.com/garyburd/redigo/internal",

@@ -3,8 +3,8 @@ package outputs
 import (
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
 )
 
 type MothershipConfig struct {
@@ -13,6 +13,7 @@ type MothershipConfig struct {
 	Host               string
 	Port               int
 	Hosts              []string
+	LoadBalance        *bool
 	Protocol           string
 	Username           string
 	Password           string
@@ -29,11 +30,7 @@ type MothershipConfig struct {
 	Flush_interval     *int
 	Bulk_size          *int
 	Max_retries        *int
-	TLS                *bool
-	Certificate        string
-	CertificateKey     string
-	CAs                []string
-	TLSInsecure        *bool
+	TLS                *TLSConfig
 }
 
 type Outputer interface {

@@ -6,11 +6,11 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/cfgfile"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/publisher"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/service"
+	"github.com/elastic/libbeat/cfgfile"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/outputs"
+	"github.com/elastic/libbeat/publisher"
+	"github.com/elastic/libbeat/service"
 )
 
 // Beater interface that every beat must use
@@ -58,6 +58,13 @@ func NewBeat(name string, version string, bt Beater) *Beat {
 // Reads and parses the default command line params
 // To set additional cmd line args use the beat.CmdLine type before calling the function
 func (beat *Beat) CommandLineSetup() {
+
+	// The -c flag is treated separately because it needs the Beat name
+	err := cfgfile.ChangeDefaultCfgfileFlag(beat.Name)
+	if err != nil {
+		fmt.Printf("Failed to fix the -c flag: %v\n", err)
+		os.Exit(1)
+	}
 
 	flag.Parse()
 

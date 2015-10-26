@@ -3,9 +3,9 @@ package publisher
 import (
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/outputs"
 )
 
 type asyncPublisher struct {

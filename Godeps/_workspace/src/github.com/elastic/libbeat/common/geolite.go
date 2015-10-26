@@ -4,9 +4,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/logp"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/nranchev/go-libGeoIP"
+	"github.com/nranchev/go-libGeoIP"
 )
 
 type Geoip struct {
@@ -16,8 +16,8 @@ type Geoip struct {
 func LoadGeoIPData(config Geoip) *libgeo.GeoIP {
 
 	geoip_paths := []string{
-		"/usr/share/GeoIP/GeoIP.dat",
-		"/usr/local/var/GeoIP/GeoIP.dat",
+		"/usr/share/GeoIP/GeoLiteCity.dat",
+		"/usr/local/var/GeoIP/GeoLiteCity.dat",
 	}
 	if config.Paths != nil {
 		geoip_paths = *config.Paths

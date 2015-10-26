@@ -7,16 +7,16 @@ import (
 	"os"
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/nranchev/go-libGeoIP"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/outputs"
+	"github.com/nranchev/go-libGeoIP"
 
 	// load supported output plugins
-	_ "github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs/elasticsearch"
-	_ "github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs/fileout"
-	_ "github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs/lumberjack"
-	_ "github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs/redis"
+	_ "github.com/elastic/libbeat/outputs/elasticsearch"
+	_ "github.com/elastic/libbeat/outputs/fileout"
+	_ "github.com/elastic/libbeat/outputs/logstash"
+	_ "github.com/elastic/libbeat/outputs/redis"
 )
 
 // command line flags
@@ -36,6 +36,7 @@ type TransactionalEventPublisher interface {
 
 type PublisherType struct {
 	name           string
+	ipaddrs        []string
 	tags           []string
 	disabled       bool
 	Index          string
@@ -85,6 +86,16 @@ func PrintPublishEvent(event common.MapStr) {
 	} else {
 		debug("Publish: %s", string(json))
 	}
+}
+
+func (publisher *PublisherType) IsPublisherIP(ip string) bool {
+	for _, myip := range publisher.ipaddrs {
+		if myip == ip {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (publisher *PublisherType) GetServerName(ip string) string {
@@ -224,6 +235,13 @@ func (publisher *PublisherType) Init(
 	}
 
 	publisher.tags = shipper.Tags
+
+	//Store the publisher's IP addresses
+	publisher.ipaddrs, err = common.LocalIpAddrsAsStrings(false)
+	if err != nil {
+		logp.Err("Failed to get local IP addresses: %s", err)
+		return err
+	}
 
 	if !publisher.disabled && publisher.TopologyOutput != nil {
 		RefreshTopologyFreq := 10 * time.Second

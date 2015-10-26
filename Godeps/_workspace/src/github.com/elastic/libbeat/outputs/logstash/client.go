@@ -1,4 +1,4 @@
-package lumberjack
+package logstash
 
 import (
 	"bytes"
@@ -10,8 +10,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
 )
 
 // lumberjackClient implements the ProtocolClient interface to be used
@@ -45,9 +45,11 @@ var (
 )
 
 var (
-	codeWindowSize    = []byte("1W")
-	codeJSONDataFrame = []byte("1J")
-	codeCompressed    = []byte("1C")
+	codeVersion byte = '2'
+
+	codeWindowSize    = []byte{codeVersion, 'W'}
+	codeJSONDataFrame = []byte{codeVersion, 'J'}
+	codeCompressed    = []byte{codeVersion, 'C'}
 )
 
 func newLumberjackClient(conn TransportClient, timeout time.Duration) *lumberjackClient {
@@ -58,22 +60,20 @@ func newLumberjackClient(conn TransportClient, timeout time.Duration) *lumberjac
 	}
 }
 
+func (l *lumberjackClient) PublishEvent(event common.MapStr) error {
+	_, err := l.PublishEvents([]common.MapStr{event})
+	return err
+}
+
 func (l *lumberjackClient) PublishEvents(events []common.MapStr) (int, error) {
 	if len(events) == 0 {
 		return 0, nil
 	}
 
+	// prepare message payload
 	if len(events) > l.windowSize {
 		events = events[:l.windowSize]
 	}
-
-	// Abort if sending request takes longer than the configured
-	// network timeout.
-	conn := l.TransportClient
-	if err := conn.SetDeadline(time.Now().Add(l.timeout)); err != nil {
-		return l.onFail(0, err)
-	}
-
 	count, payload, err := l.compressEvents(events)
 	if err != nil {
 		return 0, err
@@ -102,10 +102,6 @@ func (l *lumberjackClient) PublishEvents(events []common.MapStr) (int, error) {
 	var ackSeq uint32
 	for ackSeq < count {
 		// read until all acks
-		if err := conn.SetDeadline(time.Now().Add(l.timeout)); err != nil {
-			return l.onFail(ackSeq, err)
-		}
-
 		ackSeq, err = l.readACK()
 		if err != nil {
 			return l.onFail(ackSeq, err)
@@ -186,6 +182,10 @@ func (l *lumberjackClient) compressEvents(
 }
 
 func (l *lumberjackClient) readACK() (uint32, error) {
+	if err := l.SetDeadline(time.Now().Add(l.timeout)); err != nil {
+		return 0, err
+	}
+
 	response := make([]byte, 6)
 	ackbytes := 0
 	for ackbytes < 6 {
@@ -196,7 +196,7 @@ func (l *lumberjackClient) readACK() (uint32, error) {
 		ackbytes += n
 	}
 
-	isACK := response[0] == '1' && response[1] == 'A'
+	isACK := response[0] == codeVersion && response[1] == 'A'
 	if !isACK {
 		return 0, ErrProtocolError
 	}
@@ -205,6 +205,9 @@ func (l *lumberjackClient) readACK() (uint32, error) {
 }
 
 func (l *lumberjackClient) sendWindowSize(window uint32) error {
+	if err := l.SetDeadline(time.Now().Add(l.timeout)); err != nil {
+		return err
+	}
 	if _, err := l.Write(codeWindowSize); err != nil {
 		return err
 	}
@@ -212,6 +215,9 @@ func (l *lumberjackClient) sendWindowSize(window uint32) error {
 }
 
 func (l *lumberjackClient) sendCompressed(payload []byte) error {
+	if err := l.SetDeadline(time.Now().Add(l.timeout)); err != nil {
+		return err
+	}
 	if _, err := l.Write(codeCompressed); err != nil {
 		return err
 	}
@@ -229,7 +235,7 @@ func (l *lumberjackClient) writeDataFrame(
 	out io.Writer,
 ) error {
 	// Write JSON Data Frame:
-	// version: uint8 = '1'
+	// version: uint8 = '2'
 	// code: uint8 = 'J'
 	// seq: uint32
 	// payloadLen (bytes): uint32

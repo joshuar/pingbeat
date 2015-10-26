@@ -9,7 +9,7 @@ import (
 	"runtime/pprof"
 	"syscall"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/logp"
 )
 
 // Handles OS signals that ask the service/daemon to stop.

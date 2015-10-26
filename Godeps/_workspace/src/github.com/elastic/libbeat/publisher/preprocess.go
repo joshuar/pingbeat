@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/outputs"
 )
 
 type preprocessor struct {
@@ -99,9 +99,14 @@ func (p *preprocessor) onMessage(m message) {
 // filterEvent validates an event for common required fields with types.
 // If event is to be filtered out the reason is returned as error.
 func filterEvent(event common.MapStr) error {
-	_, ok := event["timestamp"].(common.Time)
+	ts, ok := event["timestamp"]
 	if !ok {
 		return errors.New("Missing 'timestamp' field from event")
+	}
+
+	_, ok = ts.(common.Time)
+	if !ok {
+		return errors.New("Invalid 'timestamp' field from event.")
 	}
 
 	err := event.EnsureCountField()
@@ -141,6 +146,15 @@ func updateEventAddresses(publisher *PublisherType, event common.MapStr) bool {
 		event["proc"] = dst.Proc
 		event["server"] = dstServer
 		delete(event, "dst")
+
+		//get the direction of the transaction: outgoing (as client)/incoming (as server)
+		if publisher.IsPublisherIP(dst.Ip) {
+			// outgoing transaction
+			event["direction"] = "out"
+		} else {
+			//incoming transaction
+			event["direction"] = "in"
+		}
 	}
 
 	if publisher.IgnoreOutgoing && dstServer != "" &&

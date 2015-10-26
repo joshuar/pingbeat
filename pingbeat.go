@@ -2,12 +2,12 @@ package main
 
 import (
 	// "github.com/davecgh/go-spew/spew"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/beat"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/cfgfile"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/publisher"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/tatsushid/go-fastping"
+	"github.com/elastic/libbeat/beat"
+	"github.com/elastic/libbeat/cfgfile"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/publisher"
+	"github.com/tatsushid/go-fastping"
 	"net"
 	"os"
 	"time"

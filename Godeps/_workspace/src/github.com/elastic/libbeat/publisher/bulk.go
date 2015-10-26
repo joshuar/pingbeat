@@ -1,12 +1,10 @@
 package publisher
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/common"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/logp"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/outputs"
+	"github.com/elastic/libbeat/common"
+	"github.com/elastic/libbeat/outputs"
 )
 
 type bulkWorker struct {
@@ -53,8 +51,6 @@ func (b *bulkWorker) run() {
 		case <-b.ws.done:
 			return
 		case m := <-b.queue:
-			fmt.Printf("received message: %v", m)
-
 			if m.event != nil { // single event
 				b.onEvent(m.signal, m.event)
 			} else { // batch of events
@@ -66,7 +62,6 @@ func (b *bulkWorker) run() {
 				b.publish()
 			}
 		case <-b.flushTicker.C:
-			logp.Debug("publish", "flush tick")
 			b.publish()
 		}
 	}

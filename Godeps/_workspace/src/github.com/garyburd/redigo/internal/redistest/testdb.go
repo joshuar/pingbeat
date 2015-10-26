@@ -19,7 +19,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/garyburd/redigo/redis"
+	"github.com/garyburd/redigo/redis"
 )
 
 type testConn struct {

@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/nranchev/go-libGeoIP"
+	"github.com/nranchev/go-libGeoIP"
 )
 
 func main() {

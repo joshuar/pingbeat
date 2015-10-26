@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/joshuar/pingbeat/Godeps/_workspace/src/github.com/elastic/libbeat/beat"
+	"github.com/elastic/libbeat/beat"
 )
 
 var Version = "0.0.1-alpha2"
