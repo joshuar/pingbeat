@@ -148,7 +148,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			tag = p.ipv6targets[addr.String()][1]
 		}
 		event := common.MapStr{
-			"timestamp":   common.Time(time.Now()),
+			"@timestamp":  common.Time(time.Now()),
 			"type":        "pingbeat",
 			"target_name": name,
 			"target_addr": addr.String(),
