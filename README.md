@@ -30,6 +30,10 @@ new index template using the
 Once you've created a configuration file you can run
 pingbeat with `pingbeat -c /path/to/pingbeat.yml`.
 
+There is a Kibana [export](etc/pingbeat-dashboard.json) you can use to
+create some basic visulisations and a simple dashboard to explore
+pingbeat data.
+
 ### Note on privileges
 
 In order to send regular ICMP ping packets, pingbeat needs to open raw
