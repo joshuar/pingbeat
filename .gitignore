@@ -3,3 +3,4 @@ pingbeat
 etc/pingbeat.yml
 .~lock*
 .#*
+.project

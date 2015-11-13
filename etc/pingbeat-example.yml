@@ -5,6 +5,8 @@ input:
 
   # Loop every 10 seconds
   period: 10
+  # How long to wait to recieve a ping from a target
+  timeout: 1
   # Use raw sockets for ping
   # Requires root!
   privileged: true

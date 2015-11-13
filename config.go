@@ -8,6 +8,7 @@ import (
 
 type PingConfig struct {
 	Period     *int64
+	Timeout    *int64
 	UseIPv4    *bool
 	UseIPv6    *bool
 	Privileged *bool

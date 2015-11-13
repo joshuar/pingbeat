@@ -18,6 +18,7 @@ type Pingbeat struct {
 	useIPv4     bool
 	useIPv6     bool
 	period      time.Duration
+	timeout     time.Duration
 	pingType    string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
@@ -25,6 +26,8 @@ type Pingbeat struct {
 	events      publisher.Client
 }
 
+// Function to convert s to ms
+// Not sure why this isn't provided in time...
 func milliSeconds(d time.Duration) float64 {
 	msec := d / time.Millisecond
 	nsec := d % time.Millisecond
@@ -61,19 +64,31 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 }
 
 func (p *Pingbeat) Config(b *beat.Beat) error {
+	// Read in provided config file, bail if problem
 	err := cfgfile.Read(&p.config, "")
 	if err != nil {
 		logp.Err("Error reading configuration file: %v", err)
 		return err
 	}
 
+	// Use period provided in config or default to 10s
 	if p.config.Input.Period != nil {
 		p.period = time.Duration(*p.config.Input.Period) * time.Second
 	} else {
-		p.period = 1 * time.Second
+		p.period = 10 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
 
+	// Use timeout provided in config or default to 1s
+	if p.config.Input.Timeout != nil {
+		p.timeout = time.Duration(*p.config.Input.Timeout) * time.Second
+	} else {
+		p.timeout = time.Second
+	}
+	logp.Debug("pingbeat", "Timeout %v\n", p.timeout)
+
+	// Check if we can use privileged (i.e. raw socket) ping,
+	// else use a UDP ping
 	if *p.config.Input.Privileged {
 		p.pingType = "ip"
 	} else {
@@ -81,6 +96,8 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 	logp.Debug("pingbeat", "Using %v for pings\n", p.pingType)
 
+	// Check whether IPv4/IPv6 pings are requested in config
+	// Default to just IPv4 pings
 	if &p.config.Input.UseIPv4 != nil {
 		p.useIPv4 = *p.config.Input.UseIPv4
 	} else {
@@ -93,6 +110,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
 
+	// Fill the IPv4/IPv6 targets maps
 	p.ipv4targets = make(map[string][2]string)
 	p.ipv6targets = make(map[string][2]string)
 	if p.config.Input.Targets != nil {
@@ -118,6 +136,10 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	p.isAlive = true
 
 	fp := fastping.NewPinger()
+
+	// Set the MaxRTT, i.e., the max time to wait
+	// for a target to respond
+	fp.MaxRTT = p.timeout
 
 	errInput, err := fp.Network(p.pingType)
 	if err != nil {
@@ -158,7 +180,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		p.events.PublishEvent(event)
 	}
 	// fp.OnIdle = func() {
-	// 	fmt.Println("loop done")
 	// }
 	for p.isAlive {
 		time.Sleep(p.period)
