@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// Pingbeat struct contains all options and
+// hosts to ping
 type Pingbeat struct {
 	isAlive     bool
 	useIPv4     bool
@@ -24,6 +26,7 @@ type Pingbeat struct {
 	ipv6targets map[string][2]string
 	config      ConfigSettings
 	events      publisher.Client
+	done        chan struct{}
 }
 
 // Function to convert s to ms
@@ -32,6 +35,15 @@ func milliSeconds(d time.Duration) float64 {
 	msec := d / time.Millisecond
 	nsec := d % time.Millisecond
 	return float64(msec) + float64(nsec)*1e-6
+}
+
+// Simple struct that is filled with ICMP response
+// and passed through channels
+type response struct {
+	name string
+	addr *net.IPAddr
+	rtt  time.Duration
+	tag  string
 }
 
 func (p *Pingbeat) AddTarget(target string, tag string) {
@@ -63,6 +75,19 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 	}
 }
 
+func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
+	var name, tag string
+	// ip := addr.IP
+	if addr.IP.To4() != nil {
+		name = p.ipv4targets[addr.String()][0]
+		tag = p.ipv4targets[addr.String()][1]
+	} else {
+		name = p.ipv6targets[addr.String()][0]
+		tag = p.ipv6targets[addr.String()][1]
+	}
+	return name, tag
+}
+
 func (p *Pingbeat) Config(b *beat.Beat) error {
 	// Read in provided config file, bail if problem
 	err := cfgfile.Read(&p.config, "")
@@ -71,21 +96,13 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		return err
 	}
 
-	// Use period provided in config or default to 10s
+	// Use period provided in config or default to 5s
 	if p.config.Input.Period != nil {
 		p.period = time.Duration(*p.config.Input.Period) * time.Second
 	} else {
-		p.period = 10 * time.Second
+		p.period = 5 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
-
-	// Use timeout provided in config or default to 1s
-	if p.config.Input.Timeout != nil {
-		p.timeout = time.Duration(*p.config.Input.Timeout) * time.Second
-	} else {
-		p.timeout = time.Second
-	}
-	logp.Debug("pingbeat", "Timeout %v\n", p.timeout)
 
 	// Check if we can use privileged (i.e. raw socket) ping,
 	// else use a UDP ping
@@ -129,19 +146,19 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 
 func (p *Pingbeat) Setup(b *beat.Beat) error {
 	p.events = b.Events
+	p.done = make(chan struct{})
 	return nil
 }
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
-	p.isAlive = true
 
 	fp := fastping.NewPinger()
 
-	// Set the MaxRTT, i.e., the max time to wait
-	// for a target to respond
-	fp.MaxRTT = p.timeout
+	// Set the MaxRTT, i.e., the interval between pinging a target
+	fp.MaxRTT = p.period
 
 	errInput, err := fp.Network(p.pingType)
+	results := make(map[string]*response)
 	if err != nil {
 		logp.Critical("Error: %v (input %v)", err, errInput)
 		os.Exit(1)
@@ -151,44 +168,81 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		for addr, details := range p.ipv4targets {
 			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 			fp.AddIP(addr)
+			results[addr] = nil
 		}
 	}
 	if p.useIPv6 {
 		for addr, details := range p.ipv6targets {
 			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 			fp.AddIP(addr)
-		}
-	}
-	fp.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
-		var name, tag string
-		ip := addr.IP
-		if ip.To4() != nil {
-			name = p.ipv4targets[addr.String()][0]
-			tag = p.ipv4targets[addr.String()][1]
-		} else {
-			name = p.ipv6targets[addr.String()][0]
-			tag = p.ipv6targets[addr.String()][1]
-		}
-		event := common.MapStr{
-			"@timestamp":  common.Time(time.Now()),
-			"type":        "pingbeat",
-			"target_name": name,
-			"target_addr": addr.String(),
-			"tag":         tag,
-			"rtt":         milliSeconds(rtt),
-		}
-		p.events.PublishEvent(event)
-	}
-	// fp.OnIdle = func() {
-	// }
-	for p.isAlive {
-		time.Sleep(p.period)
-		err := fp.Run()
-		if err != nil {
-			logp.Warn("Warning: %v", err)
+			results[addr] = nil
 		}
 	}
 
+	onRecv, onIdle := make(chan *response), make(chan bool)
+	fp.OnRecv = func(addr *net.IPAddr, t time.Duration) {
+		// Find the name and tag associated with this address
+		name, tag := p.Addr2Name(addr)
+		// Send the name, addr, rtt and tag as a struct through the onRecv channel
+		onRecv <- &response{name: name, addr: addr, rtt: t, tag: tag}
+	}
+	fp.OnIdle = func() {
+		onIdle <- true
+	}
+
+	fp.RunLoop()
+
+	for {
+		select {
+		case <-p.done:
+			logp.Debug("pingbeat", "Got interrupted, shutting down\n")
+			fp.Stop()
+			return nil
+		case res := <-onRecv:
+			results[res.addr.String()] = res
+		case <-onIdle:
+			for target, r := range results {
+				if r == nil {
+					var name, tag string
+					if p.ipv4targets[target][0] != "" {
+						name = p.ipv4targets[target][0]
+						tag = p.ipv4targets[target][1]
+					} else {
+						name = p.ipv6targets[target][0]
+						tag = p.ipv6targets[target][1]
+					}
+					// Packet loss
+					event := common.MapStr{
+						"@timestamp":  common.Time(time.Now()),
+						"type":        "pingbeat",
+						"target_name": name,
+						"target_addr": target,
+						"tag":         tag,
+						"loss":        true,
+					}
+					p.events.PublishEvent(event)
+				} else {
+					// Success, ping received
+					event := common.MapStr{
+						"@timestamp":  common.Time(time.Now()),
+						"type":        "pingbeat",
+						"target_name": r.name,
+						"target_addr": target,
+						"tag":         r.tag,
+						"rtt":         milliSeconds(r.rtt),
+					}
+					p.events.PublishEvent(event)
+				}
+				results[target] = nil
+			}
+		case <-fp.Done():
+			if err = fp.Err(); err != nil {
+				logp.Critical("Error: %Ping failed v", err)
+			}
+			break
+		}
+	}
+	fp.Stop()
 	return nil
 }
 
@@ -197,5 +251,5 @@ func (p *Pingbeat) Cleanup(b *beat.Beat) error {
 }
 
 func (p *Pingbeat) Stop() {
-	p.isAlive = false
+	close(p.done)
 }
