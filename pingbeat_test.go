@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/stretchr/testify/assert"
 	"net"
 	"testing"
@@ -25,7 +24,8 @@ func TestAddTarget(t *testing.T) {
 	tag = "target_as_name"
 	addrs, err := net.LookupIP(name)
 	if err != nil {
-		fmt.Printf("Failed to resolve %s to IP address!", name)
+		t.Logf("Failed to resolve %s to IP address!", name)
+		t.Fail()
 	} else {
 		addr := addrs[0].String()
 		pingbeat.AddTarget(name, tag)
@@ -41,11 +41,19 @@ func TestAddr2Name(t *testing.T) {
 
 	addrs, err := net.ResolveIPAddr("ip", "127.0.0.1")
 	if err != nil {
-		fmt.Printf("Failed to resolve 127.0.0.1 to DNS name!")
+		t.Logf("Failed to resolve 127.0.0.1 to DNS name!")
+		t.Fail()
 	} else {
 		pingbeat.AddTarget(addrs.IP.String(), "addr2name")
-		name, tag := pingbeat.Addr2Name(addrs)
-		assert.Equal(t, name, addrs.IP.String())
-		assert.Equal(t, tag, "addr2name")
 	}
+	// test lookup of address works
+	name, tag := pingbeat.Addr2Name(addrs)
+	assert.Equal(t, name, addrs.IP.String())
+	assert.Equal(t, tag, "addr2name")
+
+	// test lookup returns err for nonexistent address
+	addrs = &net.IPAddr{IP: net.ParseIP("192.168.1.1"), Zone: ""}
+	name, tag = pingbeat.Addr2Name(addrs)
+	assert.Equal(t, name, "err")
+	assert.Equal(t, tag, "err")
 }
