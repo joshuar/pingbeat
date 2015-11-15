@@ -77,13 +77,16 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 
 func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
 	var name, tag string
-	// ip := addr.IP
-	if addr.IP.To4() != nil {
+	if _, found := p.ipv4targets[addr.String()]; found {
 		name = p.ipv4targets[addr.String()][0]
 		tag = p.ipv4targets[addr.String()][1]
-	} else {
+	} else if _, found := p.ipv6targets[addr.String()]; found {
 		name = p.ipv6targets[addr.String()][0]
 		tag = p.ipv6targets[addr.String()][1]
+	} else {
+		logp.Err("Error: %s not found in Pingbeat targets!", addr.String())
+		name = "err"
+		tag = "err"
 	}
 	return name, tag
 }
@@ -204,12 +207,15 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			for target, r := range results {
 				if r == nil {
 					var name, tag string
-					if p.ipv4targets[target][0] != "" {
+					if _, found := p.ipv4targets[target]; found {
 						name = p.ipv4targets[target][0]
 						tag = p.ipv4targets[target][1]
-					} else {
+					} else if _, found := p.ipv6targets[target]; found {
 						name = p.ipv6targets[target][0]
 						tag = p.ipv6targets[target][1]
+					} else {
+						logp.Warn("Error: Unexpected target returned: %s", target)
+						break
 					}
 					// Packet loss
 					event := common.MapStr{
