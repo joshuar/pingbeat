@@ -3,37 +3,59 @@
         "_default_": {
             "_all": {
                 "enabled": true,
-                "omit_norms": true
+                "norms": {
+                    "enabled": false
+                }
             },
             "dynamic_templates": [
                 {
-                    "string_fields": {
-                        "match": "*",
-                        "match_mapping_type": "string",
+                    "pingbeat_base": {
                         "mapping": {
-                            "type": "string",
-                            "index": "analyzed",
-                            "omit_norms": true,
-                            "fields": {
-                                "raw": {
-                                    "type": "string",
-                                    "index": "not_analyzed",
-                                    "ignore_above": 256
-                                }
-                            }
-                        }
+                            "doc_values": true,
+                            "ignore_above": 1024,
+                            "index": "not_analyzed",
+                            "type": "{dynamic_type}"
+                        },
+                        "match": "*"
                     }
                 }
             ],
             "properties": {
-                "target_address": {
+                "@timestamp": {
+                    "type": "date"
+                },
+                "target_name": {
+                    "type": "string",
+                    "index": "analyzed",
+                    "norms": {
+                        "enabled": false
+                    },
+                    "fields": {
+                        "raw": {
+                            "type": "string",
+                            "index": "not_analyzed"
+                        }
+                    }
+                },
+                "target_addr": {
                     "type": "ip"
+                },
+                "tag": {
+                    "type": "string",
+                    "norms": {
+                        "enabled": false
+                    },
+                    "index": "not_analyzed",
+                    "ignore_above": 256
+                },
+                "rtt": {
+                    "type": "float"
+                },
+                "loss": {
+                    "type": "boolean"
                 }
             }
         }
-    },
-    "settings": {
-        "index.refresh_interval": "10s"
     },
     "template": "pingbeat-*"
 }
