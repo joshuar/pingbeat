@@ -3,10 +3,8 @@
 ############################# Input ############################################
 input:
 
-  # Loop every 10 seconds
-  period: 10
-  # How long to wait to recieve a ping from a target
-  timeout: 1
+  # Loop every 5 seconds
+  period: 5
   # Use raw sockets for ping
   # Requires root!
   privileged: true
