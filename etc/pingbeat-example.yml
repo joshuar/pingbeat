@@ -28,9 +28,6 @@ output:
   ### Elasticsearch as output
   elasticsearch:
 
-    # Set to true to enable elasticsearch output
-    enabled: true
-
     # Array of hosts to connect to.
     # Scheme and port can be left out and will be set to the default (http and 9200)
     # In case you specify and additional path, the scheme is required: http://localhost:9200/path
@@ -105,9 +102,6 @@ output:
 
   ### Logstash as output
   #logstash:
-    # Uncomment out this option if you want to output to Logstash. The default is false.
-    #enabled: true
-
     # The Logstash hosts
     #hosts: ["localhost:5044", "logstash:5045"]
 
@@ -154,9 +148,6 @@ output:
 
   ### File as output
   #file:
-    # Enabling file output
-    #enabled: false
-
     # Path to the directory where to save the generated files. The option is mandatory.
     #path: "/tmp/pingbeat"
 
@@ -176,9 +167,6 @@ output:
 
   ### Console output
   # console:
-    # Enabling console output
-    #enabled: false
-
     # pretty print json event
     #pretty: false
 
