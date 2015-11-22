@@ -47,7 +47,7 @@ type response struct {
 }
 
 func (p *Pingbeat) AddTarget(target string, tag string) {
-	if addr := net.ParseIP(target); addr.String() != "" {
+	if addr := net.ParseIP(target); addr.String() == "" {
 		if addr.To4() != nil {
 			logp.Debug("pingbeat", "IPv4: %s\n", addr.String())
 			p.ipv4targets[addr.String()] = [2]string{target, tag}
