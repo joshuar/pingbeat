@@ -1,7 +1,7 @@
 package main
 
 import (
-	// "github.com/davecgh/go-spew/spew"
+	//	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
@@ -46,6 +46,24 @@ type response struct {
 	tag  string
 }
 
+func FetchIPs(ip4addr, ip6addr chan string, target string) {
+	addrs, err := net.LookupIP(target)
+	if err != nil {
+		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
+	} else {
+		for j := 0; j < len(addrs); j++ {
+			if addrs[j].To4() != nil {
+				ip4addr <- addrs[j].String()
+			} else {
+				ip6addr <- addrs[j].String()
+			}
+		}
+	}
+	ip4addr <- "done"
+	ip6addr <- "done"
+	return
+}
+
 func (p *Pingbeat) AddTarget(target string, tag string) {
 	if addr := net.ParseIP(target); addr.String() == "" {
 		if addr.To4() != nil {
@@ -57,18 +75,24 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 		}
 	} else {
 		logp.Debug("pingbeat", "Getting IP addresses for %s:\n", target)
-		addrs, err := net.LookupIP(target)
-		if err != nil {
-			logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
-		} else {
-			for j := 0; j < len(addrs); j++ {
-				if addrs[j].To4() != nil {
-					logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
-					p.ipv4targets[addrs[j].String()] = [2]string{target, tag}
-				} else {
-					logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
-					p.ipv6targets[addrs[j].String()] = [2]string{target, tag}
+		ip4addr := make(chan string)
+		ip6addr := make(chan string)
+		go FetchIPs(ip4addr, ip6addr, target)
+	lookup:
+		for {
+			select {
+			case ip := <-ip4addr:
+				if ip == "done" {
+					break lookup
 				}
+				logp.Debug("pingbeat", "IPv4: %s\n", ip)
+				p.ipv4targets[ip] = [2]string{target, tag}
+			case ip := <-ip6addr:
+				if ip == "done" {
+					break lookup
+				}
+				logp.Debug("pingbeat", "IPv6: %s\n", ip)
+				p.ipv6targets[ip] = [2]string{target, tag}
 			}
 		}
 	}
