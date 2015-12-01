@@ -38,7 +38,8 @@
                     }
                 },
                 "target_addr": {
-                    "type": "ip"
+                    "type": "string",
+                    "index": "not_analyzed"
                 },
                 "tag": {
                     "type": "string",
@@ -49,7 +50,7 @@
                     "ignore_above": 256
                 },
                 "rtt": {
-                    "type": "float"
+                    "type": "double"
                 },
                 "loss": {
                     "type": "boolean"
