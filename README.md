@@ -11,6 +11,12 @@ sending/recieving ping packets and
 Elasticsearch and other outputs.  Essentially, those two libraries do
 all the heavy lifting, pingbeat is just glue around them.
 
+## Requirements
+
+pingbeat has the same requirements around the Go environment as
+libbeat, see
+[here](https://github.com/elastic/beats/blob/master/CONTRIBUTING.md#dependencies).
+
 ## Installation
 
 Install and configure [Go](https://golang.org/doc/install).
