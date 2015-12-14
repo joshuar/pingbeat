@@ -1,7 +1,7 @@
 package main
 
 import (
-	// "github.com/davecgh/go-spew/spew"
+	//	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
@@ -29,15 +29,7 @@ type Pingbeat struct {
 	done        chan struct{}
 }
 
-// Function to convert s to ms
-// Not sure why this isn't provided in time...
-func milliSeconds(d time.Duration) float64 {
-	msec := d / time.Millisecond
-	nsec := d % time.Millisecond
-	return float64(msec) + float64(nsec)*1e-6
-}
-
-// Simple struct that is filled with ICMP response
+// response struct is filled with ICMP response
 // and passed through channels
 type response struct {
 	name string
@@ -46,34 +38,76 @@ type response struct {
 	tag  string
 }
 
+// milliSeconds converts seconds to milliseconds
+func milliSeconds(d time.Duration) float64 {
+	msec := d / time.Millisecond
+	nsec := d % time.Millisecond
+	return float64(msec) + float64(nsec)*1e-6
+}
+
+// FetchIPs takes a target hostname, resolves the IP addresses for that
+// hostname via DNS and returns the results through the ip4addr/ip6addr
+// channels
+func FetchIPs(ip4addr, ip6addr chan string, target string) {
+	addrs, err := net.LookupIP(target)
+	if err != nil {
+		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
+	} else {
+		for j := 0; j < len(addrs); j++ {
+			if addrs[j].To4() != nil {
+				ip4addr <- addrs[j].String()
+			} else {
+				ip6addr <- addrs[j].String()
+			}
+		}
+	}
+	ip4addr <- "done"
+	close(ip4addr)
+	ip6addr <- "done"
+	close(ip6addr)
+	return
+}
+
+// AddTarget takes a target name and tag, fetches the IP addresses associated
+// with it and adds them to the Pingbeat struct
 func (p *Pingbeat) AddTarget(target string, tag string) {
 	if addr := net.ParseIP(target); addr.String() == "" {
-		if addr.To4() != nil {
+		if addr.To4() != nil && p.useIPv4 {
 			logp.Debug("pingbeat", "IPv4: %s\n", addr.String())
 			p.ipv4targets[addr.String()] = [2]string{target, tag}
-		} else {
+		} else if p.useIPv6 {
 			logp.Debug("pingbeat", "IPv6: %s\n", addr.String())
 			p.ipv6targets[addr.String()] = [2]string{target, tag}
 		}
 	} else {
 		logp.Debug("pingbeat", "Getting IP addresses for %s:\n", target)
-		addrs, err := net.LookupIP(target)
-		if err != nil {
-			logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
-		} else {
-			for j := 0; j < len(addrs); j++ {
-				if addrs[j].To4() != nil {
-					logp.Debug("pingbeat", "IPv4: %s\n", addrs[j].String())
-					p.ipv4targets[addrs[j].String()] = [2]string{target, tag}
-				} else {
-					logp.Debug("pingbeat", "IPv6: %s\n", addrs[j].String())
-					p.ipv6targets[addrs[j].String()] = [2]string{target, tag}
+		ip4addr := make(chan string)
+		ip6addr := make(chan string)
+		go FetchIPs(ip4addr, ip6addr, target)
+	lookup:
+		for {
+			select {
+			case ip := <-ip4addr:
+				if ip == "done" {
+					break lookup
+				} else if p.useIPv4 {
+					logp.Debug("pingbeat", "IPv4: %s\n", ip)
+					p.ipv4targets[ip] = [2]string{target, tag}
+				}
+			case ip := <-ip6addr:
+				if ip == "done" {
+					break lookup
+				} else if p.useIPv6 {
+					logp.Debug("pingbeat", "IPv6: %s\n", ip)
+					p.ipv6targets[ip] = [2]string{target, tag}
 				}
 			}
 		}
 	}
 }
 
+// Addr2Name takes a net.IPAddr and returns the name and tag
+// associated with that address in the Pingbeat struct
 func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
 	var name, tag string
 	if _, found := p.ipv4targets[addr.String()]; found {
@@ -90,6 +124,8 @@ func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
 	return name, tag
 }
 
+// Config reads in the pingbeat configuration file, validating
+// configuration parameters and setting default values where needed
 func (p *Pingbeat) Config(b *beat.Beat) error {
 	// Read in provided config file, bail if problem
 	err := cfgfile.Read(&p.config, "")
@@ -146,6 +182,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	return nil
 }
 
+// Setup performs boilerplate Beats setup
 func (p *Pingbeat) Setup(b *beat.Beat) error {
 	p.events = b.Events
 	p.done = make(chan struct{})
