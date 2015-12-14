@@ -13,19 +13,22 @@ all the heavy lifting, pingbeat is just glue around them.
 
 ## Installation
 
+Install and configure [Go](https://golang.org/doc/install).
+
 Install and update this go package with `go get -u
-github.com/joshuar/pingbeat`
+github.com/joshuar/pingbeat`.  The `pingbeat` binary will then be
+available in `$GOPATH/bin`.
+
+If intending on using the Elasticsearch output, you should add a
+new index template using the
+[supplied one](etc/pingbeat-template.json), for example with `curl
+-XPUT  /_template/pingbeat -d @/path/to/pingbeat-template.json`.
 
 ## Usage
 
 See the [example configuration file](etc/pingbeat-example.yml) for configuring
 your targets and assigning an output (default output is
 Elasticsearch).
-
-If using the Elasticsearch output, you should add a
-new index template using the
-[supplied one](etc/pingbeat-template.json), for example with `curl
--XPUT  /_template/pingbeat -d @/path/to/pingbeat-template.json`.
 
 Once you've created a configuration file you can run
 pingbeat with `pingbeat -c /path/to/pingbeat.yml`.
