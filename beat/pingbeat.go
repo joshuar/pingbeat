@@ -197,13 +197,11 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			}
 		case <-fp.Done():
 			if err = fp.Err(); err != nil {
-				logp.Critical("Error: %Ping failed v", err)
+				logp.Critical("Error: Ping failed %v", err)
 			}
 			break
 		}
 	}
-	fp.Stop()
-	return nil
 }
 
 func (p *Pingbeat) Cleanup(b *beat.Beat) error {
