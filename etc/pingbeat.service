@@ -1,0 +1,12 @@
+[Unit]
+Description=Pingbeat
+After=network.target
+
+[Service]
+Restart=always
+ExecStart=/usr/local/bin/pingbeat -c /etc/pingbeat/pingbeat.yml
+ProtectSystem=on
+ProtectHome=read-only
+
+[Install]
+WantedBy=local.target
