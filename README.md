@@ -52,6 +52,18 @@ pings. If you don't want to do that, set `privileged: false` in your
 config and run pingbeat as a regular user.  It will then use a `UDP
 ping` to test connectivity.
 
+Alternatively, on Linux you can grant pingbeat access to raw sockets
+without the need to run with sudo or as root user, by granting the
+binary `CAP_NET_RAW ` capability (see:  [capabilities](http://linux.die.net/man/7/capabilities);
+for overview of Linux capabilities). To set necessary capability,
+ensure that the `getcap` and `setcap` binaries are present (you
+might need to install relevant packages from you distribution) in
+your `PATH`, then execute the following: `setcap cap_net_raw+ep <PATH>`
+where `PATH` is the location where the pingbeat binary was installed;
+to verify execute the following: `getcap <PATH>`. Given that everything
+went well, the output from `getcap` should indicate that pingbeat has
+now `cap_net_raw+ep` capabilities set.
+
 ## License
 
 pingbeat is licensed under the Apache 2.0 [license](LICENSE).
