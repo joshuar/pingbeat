@@ -1,4 +1,4 @@
-package beat
+package config
 
 type PingConfig struct {
 	Period     *int64

@@ -1,23 +1,22 @@
-package beat
+package beater
 
 import (
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	"net"
 	"testing"
 )
 
 func TestAddTarget(t *testing.T) {
-	pingbeat := Pingbeat{}
-	pingbeat.ipv4targets = make(map[string][2]string)
-	pingbeat.ipv6targets = make(map[string][2]string)
+	p := Pingbeat{}
 
 	// test adding target as IP address
-	name := "192.168.1.1"
+	name := "245.0.0.1"
 	addr := name
 	tag := "target_as_addr"
-	pingbeat.AddTarget(name, tag)
-	assert.Equal(t, name, pingbeat.ipv4targets[addr][0])
-	assert.Equal(t, tag, pingbeat.ipv4targets[addr][1])
+	p.AddTarget(name, tag)
+	assert.Equal(t, name, p.ipv4targets[addr][0])
+	assert.Equal(t, tag, p.ipv4targets[addr][1])
 
 	// test adding target as a DNS name
 	name = "elastic.co"
@@ -28,16 +27,14 @@ func TestAddTarget(t *testing.T) {
 		t.Fail()
 	} else {
 		addr := addrs[0].String()
-		pingbeat.AddTarget(name, tag)
-		assert.Equal(t, name, pingbeat.ipv4targets[addr][0])
-		assert.Equal(t, tag, pingbeat.ipv4targets[addr][1])
+		p.AddTarget(name, tag)
+		assert.Equal(t, name, p.ipv4targets[addr][0])
+		assert.Equal(t, tag, p.ipv4targets[addr][1])
 	}
 }
 
 func TestAddr2Name(t *testing.T) {
 	pingbeat := Pingbeat{}
-	pingbeat.ipv4targets = make(map[string][2]string)
-	pingbeat.ipv6targets = make(map[string][2]string)
 
 	addrs, err := net.ResolveIPAddr("ip", "127.0.0.1")
 	if err != nil {

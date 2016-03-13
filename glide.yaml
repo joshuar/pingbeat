@@ -1,0 +1,10 @@
+package: .
+import:
+- package: github.com/elastic/beats
+  version: ae30528774fffa5879392388f651286785118d38
+  subpackages:
+  - libbeat/beat
+  - libbeat/cfgfile
+  - libbeat/common
+  - libbeat/logp
+- package: github.com/tatsushid/go-fastping

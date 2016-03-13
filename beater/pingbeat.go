@@ -1,12 +1,12 @@
-package beat
+package beater
 
 import (
-	//	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
 	"github.com/elastic/libbeat/publisher"
+	cfg "github.com/joshuar/pingbeat/config"
 	"github.com/tatsushid/go-fastping"
 	"net"
 	"os"
@@ -24,7 +24,7 @@ type Pingbeat struct {
 	pingType    string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
-	config      ConfigSettings
+	config      cfg.ConfigSettings
 	events      publisher.Client
 	done        chan struct{}
 }
@@ -245,12 +245,10 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 // AddTarget takes a target name and tag, fetches the IP addresses associated
 // with it and adds them to the Pingbeat struct
 func (p *Pingbeat) AddTarget(target string, tag string) {
-	if addr := net.ParseIP(target); addr.String() == "" {
+	if addr := net.ParseIP(target); addr.String() == target {
 		if addr.To4() != nil && p.useIPv4 {
-			logp.Debug("pingbeat", "IPv4: %s\n", addr.String())
 			p.ipv4targets[addr.String()] = [2]string{target, tag}
 		} else if p.useIPv6 {
-			logp.Debug("pingbeat", "IPv6: %s\n", addr.String())
 			p.ipv6targets[addr.String()] = [2]string{target, tag}
 		}
 	} else {

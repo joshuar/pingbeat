@@ -21,27 +21,47 @@ libbeat, see
 
 Install and configure [Go](https://golang.org/doc/install).
 
-Install and update this go package with `go get -u
-github.com/joshuar/pingbeat`.  The `pingbeat` binary will then be
-available in `$GOPATH/bin`.
+Install and update this go package with:
+
+```
+go get -u github.com/joshuar/pingbeat
+```
+
+The `pingbeat` binary will then be available in `$GOPATH/bin`.
 
 If intending on using the Elasticsearch output, you should add a
 new index template using the
-[supplied one](etc/pingbeat-template.json), for example with `curl
--XPUT  /_template/pingbeat -d @/path/to/pingbeat-template.json`.
+[supplied one](etc/pingbeat.template.json), for example with:
+
+```
+curl -XPUT  /_template/pingbeat -d @/path/to/pingbeat.template.json
+
+```
 
 ## Usage
 
-See the [example configuration file](etc/pingbeat-example.yml) for configuring
+See the [example configuration file](etc/beat.yml) for configuring
 your targets and assigning an output (default output is
 Elasticsearch).
 
-Once you've created a configuration file you can run
-pingbeat with `pingbeat -c /path/to/pingbeat.yml`.
-
-There is a Kibana [export](etc/pingbeat-dashboard.json) you can use to
+There is a Kibana [export](etc/kibana/pingbeat.dashboard.json) you can use to
 create some basic visulisations and a simple dashboard to explore
 pingbeat data.
+
+Once you've created a configuration file you can run
+pingbeat with:
+
+```
+pingbeat -c /path/to/pingbeat.yml
+
+```
+
+To run Pingbeat with debugging output enabled, run:
+
+```
+./pingbeat -c pingbeat.yml -e -d "*"
+
+```
 
 ### Note on privileges
 
