@@ -5,10 +5,11 @@ etc/pingbeat.yml
 .#*
 .project
 /.idea
-/vendor
 /build
 
 .DS_Store
 /pingbeat
 /pingbeat.test
 *.pyc
+/vendor/**/.git/
+glide.lock
