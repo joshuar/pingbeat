@@ -1,0 +1,103 @@
+
+////
+This file is generated! See etc/fields.yml and scripts/generate_field_docs.py
+////
+
+[[exported-fields]]
+== Exported Fields
+
+This document describes the fields that are exported by Pingbeat. They are
+grouped in the following categories:
+
+* <<exported-fields-common>>
+* <<exported-fields-ping>>
+
+[[exported-fields-common]]
+=== Common Beat Fields
+
+
+Contains common fields available in all event types.
+
+
+==== beat.name
+
+
+The name of the Beat sending the log messages. If the shipper name is set in the configuration file, then that value is used. If it is not set, the hostname is used.
+
+==== beat.hostname
+
+
+The hostname as returned by the operating system on which the Beat is running.
+
+==== @timestamp
+
+type: date
+
+example: 2015-01-24 14:06:05.071000
+
+format: YYYY-MM-DDTHH:MM:SS.milliZ
+
+required: True
+
+
+The timestamp when the event log record was generated.
+
+==== type
+
+required: True
+
+
+Defaults to pingbeat.
+
+[[exported-fields-ping]]
+=== Ping Response Fields
+
+
+Contains a individual ping measurement for a target.
+
+
+==== target_name
+
+type: text
+
+required: True
+
+
+The target hostname if known, else the IP address.
+
+==== target_addr
+
+type: keyword
+
+required: True
+
+
+The target IP address.
+
+==== tag
+
+type: keyword
+
+required: True
+
+
+The tag of host group this target belongs to.
+
+==== rtt
+
+type: double
+
+required: True
+
+
+The measured Round Trip Time (RTT) in milliseconds.
+
+==== loss
+
+type: boolean
+
+required: False
+
+
+If loss was detected for this host.
+

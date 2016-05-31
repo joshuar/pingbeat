@@ -1,15 +1,57 @@
+/vendor/**/.git*
+
 pingbeat
-*.tmp
-etc/pingbeat.yml
-.~lock*
-.#*
-.project
+
+# Directories
+/.vagrant
 /.idea
 /build
+_obj
+_test
 
+# Files
 .DS_Store
-/pingbeat
-/pingbeat.test
+/glide.lock
+/beats.iml
+*.dev.yml
+
+# Editor swap files
+*.swp
+*.swo
+*.swn
+.~lock*
+.#*
+*~
+*.tmp
+
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+*.exe
+*.test
+*.prof
 *.pyc
-/vendor/**/.git/
-glide.lock
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+
+_testmain.go
+
+
+/cover/
+/coverage/
+/tests/system/env/
+/tests/system/run/
+/tests/system/last_run
+profile.cov
+/docs/html_docs
+
+build

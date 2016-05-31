@@ -1,0 +1,80 @@
+version: 0.99
+
+defaults:
+  type: string
+  required: false
+  index: true
+  doc_values: true
+  ignore_above: 1024
+
+common:
+  type: group
+  description: >-
+
+    Contains common fields available in all event types.
+  fields:
+    - name: beat.name
+      description: >-
+
+        The name of the Beat sending the log messages. If the shipper name is
+        set in the configuration file, then that value is used. If it is not
+        set, the hostname is used.
+    - name: beat.hostname
+      description: >-
+
+        The hostname as returned by the operating system on which the Beat is
+        running.
+    - name: "@timestamp"
+      type: date
+      required: true
+      format: YYYY-MM-DDTHH:MM:SS.milliZ
+      example: 2015-01-24T14:06:05.071Z
+      description: >-
+
+        The timestamp when the event log record was generated.
+    - name: type
+      required: true
+      description: >-
+
+        Defaults to pingbeat.
+
+ping:
+  type: group
+  description: >-
+
+    Contains a individual ping measurement for a target.
+  fields:
+    - name: target_name
+      type: text
+      required: true
+      description: >-
+
+        The target hostname if known, else the IP address.
+    - name: target_addr
+      type: keyword
+      required: true
+      description: >-
+
+        The target IP address.
+    - name: tag
+      type: keyword
+      required: true
+      description: >-
+
+        The tag of host group this target belongs to.
+    - name: rtt
+      type: double
+      required: true
+      description: >-
+
+        The measured Round Trip Time (RTT) in milliseconds.
+    - name: loss
+      type: boolean
+      required: false
+      description: >-
+
+        If loss was detected for this host.
+
+sections:
+  - ["common", "Common Beat"]
+  - ["ping", "Ping Response"]
