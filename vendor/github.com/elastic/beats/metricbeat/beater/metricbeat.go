@@ -1,7 +1,10 @@
 /*
+Package beater provides the implementation of the libbeat Beater interface for
+Metricbeat. The main event loop is implemented in this package. The public
+interfaces used in implementing Modules and MetricSets are defined in the
+github.com/elastic/beats/metricbeat/mb package.
 
 Metricbeat collects metric sets from different modules.
-
 
 Each event created has the following format:
 
@@ -20,101 +23,95 @@ Each event created has the following format:
 		"@timestamp": timestamp
 	}
 
-All documents are currently stored in one index called metricbeat. It is important to use an independent namespace
-for each MetricSet to prevent type conflicts. Also all values are stored under the same type "metricsets".
-
+All documents are stored in one index called metricbeat. It is important to use
+an independent namespace for each MetricSet to prevent type conflicts. Also all
+values are stored under the same type "metricsets".
 */
 package beater
 
 import (
-	"fmt"
+	"expvar"
+	"sync"
 
 	"github.com/elastic/beats/libbeat/beat"
-	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/metricbeat/helper"
+	"github.com/elastic/beats/metricbeat/mb"
+
+	"github.com/pkg/errors"
 )
 
+// Metricbeat implements the Beater interface for metricbeat.
 type Metricbeat struct {
-	done          chan struct{}
-	MbConfig      *MetricbeatConfig
-	ModulesConfig *RawModulesConfig
-	MetricsConfig *RawMetricsConfig
+	done    chan struct{}    // Channel used to initiate shutdown.
+	config  *Config          // Metricbeat specific configuration data.
+	modules []*moduleWrapper // Active list of modules.
 }
 
-// New creates a new Metricbeat instance
+// New creates and returns a new Metricbeat instance.
 func New() *Metricbeat {
 	return &Metricbeat{}
 }
 
-func (mb *Metricbeat) Config(b *beat.Beat) error {
+// Config unpacks the Metricbeat specific configuration data.
+func (bt *Metricbeat) Config(b *beat.Beat) error {
+	// List all registered modules and metricsets.
+	logp.Info("%s", mb.Registry.String())
 
-	mb.MbConfig = &MetricbeatConfig{}
-	err := cfgfile.Read(mb.MbConfig, "")
+	bt.config = &Config{}
+	err := b.RawConfig.Unpack(bt.config)
 	if err != nil {
-		fmt.Println(err)
-		logp.Err("Error reading configuration file: %v", err)
-		return err
+		return errors.Wrap(err, "error reading configuration file")
 	}
 
-	mb.ModulesConfig = &RawModulesConfig{}
-	err = cfgfile.Read(mb.ModulesConfig, "")
-	if err != nil {
-		fmt.Println(err)
-		logp.Err("Error reading configuration file: %v", err)
-		return err
-	}
+	return nil
+}
 
-	mb.MetricsConfig = &RawMetricsConfig{}
-	err = cfgfile.Read(mb.MetricsConfig, "")
-	if err != nil {
-		fmt.Println(err)
-		logp.Err("Error reading configuration file: %v", err)
-		return err
-	}
+// Setup initializes the Modules and MetricSets that are defined in the
+// Metricbeat configuration.
+func (bt *Metricbeat) Setup(b *beat.Beat) error {
+	var err error
+	bt.done = make(chan struct{})
+	bt.modules, err = newModuleWrappers(bt.config.Modules, mb.Registry, b.Publisher)
+	return err
+}
 
-	logp.Info("Setup base and raw configuration for Modules and Metrics")
-	// Apply the base configuration to each module and metric
-	for moduleName, module := range helper.Registry {
-		// Check if config for module exist. Only configured modules are loaded
-		if _, ok := mb.MbConfig.Metricbeat.Modules[moduleName]; !ok {
-			continue
-		}
-		module.BaseConfig = mb.MbConfig.getModuleConfig(moduleName)
-		module.RawConfig = mb.ModulesConfig.Metricbeat.Modules[moduleName]
-		module.Enabled = true
-
-		for metricSetName, metricSet := range module.MetricSets {
-			// Check if config for metricset exist. Only configured metricset are loaded
-			if _, ok := mb.MbConfig.getModuleConfig(moduleName).MetricSets[metricSetName]; !ok {
-				continue
-			}
-			metricSet.BaseConfig = mb.MbConfig.getModuleConfig(moduleName).MetricSets[metricSetName]
-			metricSet.RawConfig = mb.MetricsConfig.Metricbeat.Modules[moduleName].MetricSets[metricSetName]
-			metricSet.Enabled = true
+// Run starts the workers for Metricbeat and blocks until Stop is called
+// and the workers complete. Each host associated with a MetricSet is given its
+// own goroutine for fetching data. The ensures that each host is isolated so
+// that a single unresponsive host cannot inadvertently block other hosts
+// within the same Module and MetricSet from collection.
+func (bt *Metricbeat) Run(b *beat.Beat) error {
+	var wg sync.WaitGroup
+	for _, mw := range bt.modules {
+		wg.Add(len(mw.metricSets))
+		for _, msw := range mw.metricSets {
+			go msw.startFetching(bt.done, &wg)
 		}
 	}
 
+	wg.Wait()
 	return nil
 }
 
-func (mb *Metricbeat) Setup(b *beat.Beat) error {
-	mb.done = make(chan struct{})
+// Cleanup performs clean-up after Run completes.
+func (bt *Metricbeat) Cleanup(b *beat.Beat) error {
+	logp.Info("Dumping runtime metrics...")
+	expvar.Do(func(kv expvar.KeyValue) {
+		if kv.Key != "memstats" {
+			logp.Info("%s=%s", kv.Key, kv.Value.String())
+		}
+	})
 	return nil
 }
 
-func (mb *Metricbeat) Run(b *beat.Beat) error {
-
-	helper.StartModules(b)
-	<-mb.done
-
-	return nil
-}
-
-func (mb *Metricbeat) Cleanup(b *beat.Beat) error {
-	return nil
-}
-
-func (mb *Metricbeat) Stop() {
-	close(mb.done)
+// Stop signals to Metricbeat that it should stop. It closes the "done" channel
+// and closes the publisher client associated with each Module.
+//
+// Stop should only be called a single time. Calling it more than once may
+// result in undefined behavior.
+func (bt *Metricbeat) Stop() {
+	close(bt.done)
+	for _, moduleWrapper := range bt.modules {
+		moduleWrapper.pubClient.Close()
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/op"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/outputs"
 )
@@ -29,10 +30,10 @@ type ConnectionMode interface {
 
 	// PublishEvents will send all events (potentially asynchronous) to its
 	// clients.
-	PublishEvents(trans outputs.Signaler, opts outputs.Options, events []common.MapStr) error
+	PublishEvents(sig op.Signaler, opts outputs.Options, events []common.MapStr) error
 
 	// PublishEvent will send an event to its clients.
-	PublishEvent(trans outputs.Signaler, opts outputs.Options, event common.MapStr) error
+	PublishEvent(sig op.Signaler, opts outputs.Options, event common.MapStr) error
 }
 
 type Connectable interface {
@@ -90,108 +91,6 @@ var (
 	debug = logp.MakeDebug("output")
 )
 
-func NewConnectionMode(
-	clients []ProtocolClient,
-	failover bool,
-	maxAttempts int,
-	waitRetry, timeout, maxWaitRetry time.Duration,
-) (ConnectionMode, error) {
-	if failover {
-		clients = NewFailoverClient(clients)
-	}
-
-	if len(clients) == 1 {
-		return NewSingleConnectionMode(clients[0], maxAttempts,
-			waitRetry, timeout, maxWaitRetry)
-	}
-	return NewLoadBalancerMode(clients, maxAttempts,
-		waitRetry, timeout, maxWaitRetry)
-}
-
-func NewAsyncConnectionMode(
-	clients []AsyncProtocolClient,
-	failover bool,
-	maxAttempts int,
-	waitRetry, timeout, maxWaitRetry time.Duration,
-) (ConnectionMode, error) {
-	if failover {
-		clients = NewAsyncFailoverClient(clients)
-	}
-	return NewAsyncLoadBalancerMode(clients, maxAttempts,
-		waitRetry, timeout, maxWaitRetry)
-}
-
-// MakeClients will create a list from of ProtocolClient instances from
-// outputer configuration host list and client factory function.
-func MakeClients(
-	config outputs.MothershipConfig,
-	newClient func(string) (ProtocolClient, error),
-) ([]ProtocolClient, error) {
-	hosts := ReadHostList(config)
-	if len(hosts) == 0 {
-		return nil, ErrNoHostsConfigured
-	}
-
-	clients := make([]ProtocolClient, 0, len(hosts))
-	for _, host := range hosts {
-		client, err := newClient(host)
-		if err != nil {
-			// on error destroy all client instance created
-			for _, client := range clients {
-				_ = client.Close() // ignore error
-			}
-			return nil, err
-		}
-		clients = append(clients, client)
-	}
-	return clients, nil
-}
-
-func MakeAsyncClients(
-	config outputs.MothershipConfig,
-	newClient func(string) (AsyncProtocolClient, error),
-) ([]AsyncProtocolClient, error) {
-	hosts := ReadHostList(config)
-	if len(hosts) == 0 {
-		return nil, ErrNoHostsConfigured
-	}
-
-	clients := make([]AsyncProtocolClient, 0, len(hosts))
-	for _, host := range hosts {
-		client, err := newClient(host)
-		if err != nil {
-			// on error destroy all client instance created
-			for _, client := range clients {
-				_ = client.Close() // ignore error
-			}
-			return nil, err
-		}
-		clients = append(clients, client)
-	}
-	return clients, nil
-}
-
-func ReadHostList(config outputs.MothershipConfig) []string {
-	var lst []string
-
-	// TODO: remove config.Host
-	if len(config.Hosts) > 0 {
-		lst = config.Hosts
-	} else if config.Host != "" {
-		lst = []string{config.Host}
-	}
-
-	if len(lst) == 0 || config.Worker <= 1 {
-		return lst
-	}
-
-	// duplicate entries config.Workers times
-	hosts := make([]string, 0, len(lst)*config.Worker)
-	for _, entry := range lst {
-		for i := 0; i < config.Worker; i++ {
-			hosts = append(hosts, entry)
-		}
-	}
-
-	return hosts
+func Dropped(i int) {
+	messagesDropped.Add(int64(i))
 }

@@ -14,18 +14,25 @@ init:
 	glide update  --no-recursive
 	make update
 	git init
-	git add .
 
-.PHONY: install-cfg
-install-cfg:
-	mkdir -p $(PREFIX)
-	cp etc/pingbeat.template.json     $(PREFIX)/pingbeat.template.json
-	cp etc/pingbeat.yml               $(PREFIX)/pingbeat.yml
-	cp etc/pingbeat.yml               $(PREFIX)/pingbeat-linux.yml
-	cp etc/pingbeat.yml               $(PREFIX)/pingbeat-binary.yml
-	cp etc/pingbeat.yml               $(PREFIX)/pingbeat-darwin.yml
-	cp etc/pingbeat.yml               $(PREFIX)/pingbeat-win.yml
+.PHONY: commit
+commit:
+	git add README.md CONTRIBUTING.md
+	git commit -m "Initial commit"
+	git add LICENSE
+	git commit -m "Add the LICENSE"
+	git add .gitignore .gitattributes
+	git commit -m "Add git settings"
+	git add .
+	git reset -- .travis.yml
+	git commit -m "Add Pingbeat"
+	git add .travis.yml
+	git commit -m "Add Travis CI"
 
 .PHONY: update-deps
 update-deps:
-	glide update  --no-recursive
+	glide update --no-recursive --strip-vcs
+
+# This is called by the beats packer before building starts
+.PHONY: before-build
+before-build:

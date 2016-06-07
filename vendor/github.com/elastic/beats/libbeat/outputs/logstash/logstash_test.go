@@ -1,14 +1,10 @@
+// Need for unit and integration tests
+
 package logstash
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"sync"
@@ -18,43 +14,68 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/op"
 	"github.com/elastic/beats/libbeat/common/streambuf"
 	"github.com/elastic/beats/libbeat/outputs"
+	"github.com/elastic/beats/libbeat/outputs/transport/transptest"
+)
+
+const (
+	logstashDefaultHost     = "localhost"
+	logstashTestDefaultPort = "5044"
 )
 
 type mockLSServer struct {
-	*mockServer
+	*transptest.MockServer
 }
 
 var testOptions = outputs.Options{}
 
 func newMockTLSServer(t *testing.T, to time.Duration, cert string) *mockLSServer {
-	return &mockLSServer{newMockServerTLS(t, to, cert)}
+	return &mockLSServer{transptest.NewMockServerTLS(t, to, cert, nil)}
 }
 
 func newMockTCPServer(t *testing.T, to time.Duration) *mockLSServer {
-	return &mockLSServer{newMockServerTCP(t, to, "")}
+	return &mockLSServer{transptest.NewMockServerTCP(t, to, "", nil)}
 }
 
 func (m *mockLSServer) readMessage(buf *streambuf.Buffer, client net.Conn) *message {
-	if m.err != nil {
+	if m.Err != nil {
 		return nil
 	}
 
-	m.clientDeadline(client, m.timeout)
-	if m.err != nil {
+	m.ClientDeadline(client, m.Timeout)
+	if m.Err != nil {
 		return nil
 	}
 
 	msg, err := sockReadMessage(buf, client)
-	m.err = err
+	m.Err = err
 	return msg
 }
 
 func (m *mockLSServer) sendACK(client net.Conn, seq uint32) {
-	if m.err == nil {
-		m.err = sockSendACK(client, seq)
+	if m.Err == nil {
+		m.Err = sockSendACK(client, seq)
 	}
+}
+
+func strDefault(a, defaults string) string {
+	if len(a) == 0 {
+		return defaults
+	}
+	return a
+}
+
+func getenv(name, defaultValue string) string {
+	return strDefault(os.Getenv(name), defaultValue)
+}
+
+func getLogstashHost() string {
+	return fmt.Sprintf("%v:%v",
+		getenv("LS_HOST", logstashDefaultHost),
+		getenv("LS_TCP_PORT", logstashTestDefaultPort),
+	)
 }
 
 func testEvent() common.MapStr {
@@ -73,15 +94,13 @@ func testLogstashIndex(test string) string {
 func newTestLumberjackOutput(
 	t *testing.T,
 	test string,
-	config *outputs.MothershipConfig,
+	config map[string]interface{},
 ) outputs.BulkOutputer {
 	if config == nil {
-		config = &outputs.MothershipConfig{
-			TLS:   nil,
-			Hosts: []string{getLogstashHost()},
-			Index: testLogstashIndex(test),
+		config = map[string]interface{}{
+			"hosts": []string{getLogstashHost()},
+			"index": testLogstashIndex(test),
 		}
-
 	}
 
 	plugin := outputs.FindOutputPlugin("logstash")
@@ -89,7 +108,8 @@ func newTestLumberjackOutput(
 		t.Fatalf("No logstash output plugin found")
 	}
 
-	output, err := plugin.NewOutput(config, 0)
+	cfg, _ := common.NewConfigFrom(config)
+	output, err := plugin(cfg, 0)
 	if err != nil {
 		t.Fatalf("init logstash output plugin failed: %v", err)
 	}
@@ -100,7 +120,7 @@ func newTestLumberjackOutput(
 func testOutputerFactory(
 	t *testing.T,
 	test string,
-	config *outputs.MothershipConfig,
+	config map[string]interface{},
 ) func() outputs.BulkOutputer {
 	return func() outputs.BulkOutputer {
 		return newTestLumberjackOutput(t, test, config)
@@ -135,115 +155,17 @@ func sockSendACK(out io.Writer, seq uint32) error {
 	return err
 }
 
-// genCertsIfMIssing generates a testing certificate for ip 127.0.0.1 for
-// testing if certificate or key is missing. Generated is used for CA,
-// client-auth and server-auth. Use only for testing.
-func genCertsForIPIfMIssing(
-	t *testing.T,
-	ip net.IP,
-	name string,
-) error {
-	capem := name + ".pem"
-	cakey := name + ".key"
-
-	_, err := os.Stat(capem)
-	if err == nil {
-		_, err = os.Stat(cakey)
-		if err == nil {
-			return nil
-		}
-	}
-
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		t.Fatalf("failed to generate serial number: %s", err)
-	}
-
-	caTemplate := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Country:            []string{"US"},
-			Organization:       []string{"elastic"},
-			OrganizationalUnit: []string{"beats"},
-		},
-		Issuer: pkix.Name{
-			Country:            []string{"US"},
-			Organization:       []string{"elastic"},
-			OrganizationalUnit: []string{"beats"},
-			Locality:           []string{"locality"},
-			Province:           []string{"province"},
-			StreetAddress:      []string{"Mainstreet"},
-			PostalCode:         []string{"12345"},
-			SerialNumber:       "23",
-			CommonName:         "*",
-		},
-		IPAddresses: []net.IP{ip},
-
-		SignatureAlgorithm:    x509.SHA512WithRSA,
-		PublicKeyAlgorithm:    x509.ECDSA,
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
-		SubjectKeyId:          []byte("12345"),
-		BasicConstraintsValid: true,
-		IsCA: true,
-		ExtKeyUsage: []x509.ExtKeyUsage{
-			x509.ExtKeyUsageClientAuth,
-			x509.ExtKeyUsageServerAuth},
-		KeyUsage: x509.KeyUsageKeyEncipherment |
-			x509.KeyUsageDigitalSignature |
-			x509.KeyUsageCertSign,
-	}
-
-	// generate keys
-	priv, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Fatalf("failed to generate ca private key: %v", err)
-	}
-	pub := &priv.PublicKey
-
-	// generate certificate
-	caBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		&caTemplate,
-		&caTemplate,
-		pub, priv)
-	if err != nil {
-		t.Fatalf("failed to generate ca certificate: %v", err)
-	}
-
-	// write key file
-	keyOut, err := os.OpenFile(cakey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		t.Fatalf("failed to open key file for writing: %v", err)
-	}
-	pem.Encode(keyOut, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	keyOut.Close()
-
-	// write certificate
-	certOut, err := os.Create(capem)
-	if err != nil {
-		t.Fatalf("failed to open cert.pem for writing: %s", err)
-	}
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
-	certOut.Close()
-
-	return nil
-}
-
 func TestLogstashTCP(t *testing.T) {
 	timeout := 2 * time.Second
 	server := newMockTCPServer(t, timeout)
 
 	// create lumberjack output client
-	config := outputs.MothershipConfig{
-		Timeout: 2,
-		Hosts:   []string{server.Addr()},
+	config := map[string]interface{}{
+		"hosts":   []string{server.Addr()},
+		"index":   testLogstashIndex("logstash-conn-tcp"),
+		"timeout": 2,
 	}
-
-	testConnectionType(t, server, testOutputerFactory(t, "", &config))
+	testConnectionType(t, server, testOutputerFactory(t, "", config))
 }
 
 func TestLogstashTLS(t *testing.T) {
@@ -251,18 +173,16 @@ func TestLogstashTLS(t *testing.T) {
 	ip := net.IP{127, 0, 0, 1}
 
 	timeout := 2 * time.Second
-	genCertsForIPIfMIssing(t, ip, certName)
+	transptest.GenCertsForIPIfMIssing(t, ip, certName)
 	server := newMockTLSServer(t, timeout, certName)
 
-	config := outputs.MothershipConfig{
-		TLS: &outputs.TLSConfig{
-			CAs: []string{certName + ".pem"},
-		},
-		Timeout: 2,
-		Hosts:   []string{server.Addr()},
+	config := map[string]interface{}{
+		"hosts":                       []string{server.Addr()},
+		"index":                       testLogstashIndex("logstash-conn-tls"),
+		"timeout":                     2,
+		"tls.certificate_authorities": []string{certName + ".pem"},
 	}
-
-	testConnectionType(t, server, testOutputerFactory(t, "", &config))
+	testConnectionType(t, server, testOutputerFactory(t, "", config))
 }
 
 func TestLogstashInvalidTLSInsecure(t *testing.T) {
@@ -270,21 +190,18 @@ func TestLogstashInvalidTLSInsecure(t *testing.T) {
 	ip := net.IP{1, 2, 3, 4}
 
 	timeout := 2 * time.Second
-	genCertsForIPIfMIssing(t, ip, certName)
+	transptest.GenCertsForIPIfMIssing(t, ip, certName)
 	server := newMockTLSServer(t, timeout, certName)
 
-	retries := 1
-	config := outputs.MothershipConfig{
-		TLS: &outputs.TLSConfig{
-			CAs:      []string{certName + ".pem"},
-			Insecure: true,
-		},
-		Timeout:    2,
-		MaxRetries: &retries,
-		Hosts:      []string{server.Addr()},
+	config := map[string]interface{}{
+		"hosts":                       []string{server.Addr()},
+		"index":                       testLogstashIndex("logstash-conn-tls-invalid"),
+		"timeout":                     2,
+		"max_retries":                 1,
+		"tls.insecure":                true,
+		"tls.certificate_authorities": []string{certName + ".pem"},
 	}
-
-	testConnectionType(t, server, testOutputerFactory(t, "", &config))
+	testConnectionType(t, server, testOutputerFactory(t, "", config))
 }
 
 func testConnectionType(
@@ -303,6 +220,8 @@ func testConnectionType(
 		finish sync.WaitGroup
 	}
 
+	t.Log("testConnectionType")
+
 	wg.ready.Add(1)  // server signaling readiness to client worker
 	wg.finish.Add(2) // server/client signaling test end
 
@@ -311,14 +230,17 @@ func testConnectionType(
 		defer wg.finish.Done()
 		wg.ready.Done()
 
-		client := server.accept()
-		server.handshake(client)
+		t.Log("start server loop")
+		defer t.Log("stop server loop")
+
+		client := server.Accept()
+		server.Handshake(client)
 
 		buf := streambuf.New(nil)
 		result.win = server.readMessage(buf, client)
 		result.data = server.readMessage(buf, client)
 		server.sendACK(client, 1)
-		result.err = server.err
+		result.err = server.Err
 	}()
 
 	// worker loop
@@ -326,11 +248,19 @@ func testConnectionType(
 		defer wg.finish.Done()
 		wg.ready.Wait()
 
-		output := makeOutputer()
+		t.Log("start worker loop")
+		defer t.Log("stop worker loop")
 
-		signal := outputs.NewSyncSignal()
+		t.Log("make outputter")
+		output := makeOutputer()
+		t.Logf("new outputter: %v", output)
+
+		signal := op.NewSignalChannel()
+		t.Log("publish event")
 		output.PublishEvent(signal, testOptions, testEvent())
-		result.signal = signal.Wait()
+
+		t.Log("wait signal")
+		result.signal = signal.Wait() == op.SignalCompleted
 	}()
 
 	// wait shutdown
@@ -358,17 +288,15 @@ func TestLogstashInvalidTLS(t *testing.T) {
 	ip := net.IP{1, 2, 3, 4}
 
 	timeout := 2 * time.Second
-	genCertsForIPIfMIssing(t, ip, certName)
+	transptest.GenCertsForIPIfMIssing(t, ip, certName)
 	server := newMockTLSServer(t, timeout, certName)
 
-	retries := 0
-	config := outputs.MothershipConfig{
-		TLS: &outputs.TLSConfig{
-			CAs: []string{certName + ".pem"},
-		},
-		Timeout:    1,
-		MaxRetries: &retries,
-		Hosts:      []string{server.Addr()},
+	config := map[string]interface{}{
+		"hosts":                       []string{server.Addr()},
+		"index":                       testLogstashIndex("logstash-tls-invalid"),
+		"timeout":                     1,
+		"max_retries":                 0,
+		"tls.certificate_authorities": []string{certName + ".pem"},
 	}
 
 	var result struct {
@@ -390,13 +318,13 @@ func TestLogstashInvalidTLS(t *testing.T) {
 		defer wg.finish.Done()
 		wg.ready.Done()
 
-		client := server.accept()
-		if server.err != nil {
-			t.Fatalf("server error: %v", server.err)
+		client := server.Accept()
+		if server.Err != nil {
+			t.Fatalf("server error: %v", server.Err)
 		}
 
-		server.handshake(client)
-		result.handshakeFail = server.err != nil
+		server.Handshake(client)
+		result.handshakeFail = server.Err != nil
 	}()
 
 	// client loop
@@ -404,11 +332,11 @@ func TestLogstashInvalidTLS(t *testing.T) {
 		defer wg.finish.Done()
 		wg.ready.Wait()
 
-		output := newTestLumberjackOutput(t, "", &config)
+		output := newTestLumberjackOutput(t, "", config)
 
-		signal := outputs.NewSyncSignal()
+		signal := op.NewSignalChannel()
 		output.PublishEvent(signal, testOptions, testEvent())
-		result.signal = signal.Wait()
+		result.signal = signal.Wait() == op.SignalCompleted
 	}()
 
 	// wait shutdown

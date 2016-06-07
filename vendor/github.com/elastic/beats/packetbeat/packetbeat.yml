@@ -12,14 +12,44 @@
 
 # Select the network interfaces to sniff the data. You can use the "any"
 # keyword to sniff on all connected interfaces.
-interfaces:
+packetbeat.interfaces:
   device: any
 
+packetbeat.flows:
+  # Set network flow timeout. Flow is killed if no packet is received before being
+  # timed out.
+  #timeout: 30s
+
+  # Configure reporting period. If set to -1, only killed flows will be reported
+  #period: 10s
+
 ############################# Protocols #######################################
-protocols:
+packetbeat.protocols:
   icmp:
     # Enable ICMPv4 and ICMPv6 monitoring. Default: false
     enabled: true
+
+  amqp:
+    # Configure the ports where to listen for AMQP traffic. You can disable
+    # the AMQP protocol by commenting out the list of ports.
+    ports: [5672]
+    # Truncate messages that are published and avoid huge messages being
+    # indexed.
+    # Default: 1000
+    #max_body_length: 1000
+
+    # Hide the header fields in header frames.
+    # Default: false
+    #parse_headers: false
+
+    # Hide the additional arguments of method frames.
+    # Default: false
+    #parse_arguments: false
+
+    # Hide all methods relative to connection negociation between server and
+    # client.
+    # Default: true
+    #hide_connection_information: true
 
   dns:
     # Configure the ports where to listen for DNS traffic. You can disable
@@ -116,6 +146,11 @@ protocols:
     # the MongoDB protocol by commenting out the list of ports.
     ports: [27017]
 
+  nfs:
+    # Configure the ports where to listen for NFS traffic. You can disable
+    # the NFS protocol by commenting out the list of ports.
+    ports: [2049]
+
 ############################# Processes #######################################
 
 # Configure the processes to be monitored and how to find them. If a process is
@@ -126,7 +161,7 @@ protocols:
 # Process matching is optional and can be enabled by uncommenting the following
 # lines.
 #
-#procs:
+#packetbeat.procs:
 #  enabled: false
 #  monitored:
 #    - process: mysqld
@@ -140,7 +175,6 @@ protocols:
 #
 #    - process: app
 #      cmdline_grep: gunicorn
-
 ###############################################################################
 ############################# Libbeat Config ##################################
 # Base config file used by all other beats for using libbeat features
@@ -177,18 +211,18 @@ output:
     #index: "packetbeat"
 
     # A template is used to set the mapping in Elasticsearch
-    # By default template loading is disabled and no template is loaded.
+    # By default template loading is enabled and the template is loaded.
     # These settings can be adjusted to load your own template or overwrite existing ones
-    #template:
+    template:
 
       # Template name. By default the template name is packetbeat.
-      #name: "packetbeat"
+      name: "packetbeat"
 
       # Path to template file
-      #path: "packetbeat.template.json"
+      path: "packetbeat.template.json"
 
       # Overwrite existing template
-      #overwrite: false
+      overwrite: false
 
     # Optional HTTP Path
     #path: "/elasticsearch"
@@ -265,10 +299,15 @@ output:
     # Optional load balance the events between the Logstash hosts
     #loadbalance: true
 
-    # Optional index name. The default index name depends on the each beat.
-    # For Packetbeat, the default is set to packetbeat, for Topbeat
-    # top topbeat and for Filebeat to filebeat.
+    # Optional index name. The default index name is set to name of the beat
+    # in all lowercase.
     #index: packetbeat
+
+    # SOCKS5 proxy server URL
+    #proxy_url: socks5://user:password@socks5-server:2233
+
+    # Resolve names locally when using a proxy server. Defaults to false.
+    #proxy_use_local_resolver: false
 
     # Optional TLS. By default is off.
     #tls:
@@ -303,7 +342,7 @@ output:
     #filename: packetbeat
 
     # Maximum size in kilobytes of each file. When this size is reached, the files are
-    # rotated. The default value is 10 MB.
+    # rotated. The default value is 10240 kB.
     #rotate_every_kb: 10000
 
     # Maximum number of files under path. When this number of files is reached, the
@@ -318,47 +357,54 @@ output:
     #pretty: false
 
 
-############################# Shipper #########################################
+############################# General #########################################
 
-shipper:
-  # The name of the shipper that publishes the network data. It can be used to group
-  # all the transactions sent by a single shipper in the web interface.
-  # If this options is not defined, the hostname is used.
-  #name:
+# The name of the shipper that publishes the network data. It can be used to group
+# all the transactions sent by a single shipper in the web interface.
+# If this options is not defined, the hostname is used.
+#name:
 
-  # The tags of the shipper are included in their own field with each
-  # transaction published. Tags make it easy to group servers by different
-  # logical properties.
-  #tags: ["service-X", "web-tier"]
+# The tags of the shipper are included in their own field with each
+# transaction published. Tags make it easy to group servers by different
+# logical properties.
+#tags: ["service-X", "web-tier"]
 
-  # Uncomment the following if you want to ignore transactions created
-  # by the server on which the shipper is installed. This option is useful
-  # to remove duplicates if shippers are installed on multiple servers.
-  #ignore_outgoing: true
+# Optional fields that you can specify to add additional information to the
+# output. Fields can be scalar values, arrays, dictionaries, or any nested
+# combination of these.
+#fields:
+#  env: staging
 
-  # How often (in seconds) shippers are publishing their IPs to the topology map.
-  # The default is 10 seconds.
-  #refresh_topology_freq: 10
+# If this option is set to true, the custom fields are stored as top-level
+# fields in the output document instead of being grouped under a fields
+# sub-dictionary. Default is false.
+#fields_under_root: false
 
-  # Expiration time (in seconds) of the IPs published by a shipper to the topology map.
-  # All the IPs will be deleted afterwards. Note, that the value must be higher than
-  # refresh_topology_freq. The default is 15 seconds.
-  #topology_expire: 15
+# Uncomment the following if you want to ignore transactions created
+# by the server on which the shipper is installed. This option is useful
+# to remove duplicates if shippers are installed on multiple servers.
+#ignore_outgoing: true
 
-  # Internal queue size for single events in processing pipeline
-  #queue_size: 1000
+# How often (in seconds) shippers are publishing their IPs to the topology map.
+# The default is 10 seconds.
+#refresh_topology_freq: 10
 
-  # Configure local GeoIP database support.
-  # If no paths are not configured geoip is disabled.
-  #geoip:
-    #paths:
-    #  - "/usr/share/GeoIP/GeoLiteCity.dat"
-    #  - "/usr/local/var/GeoIP/GeoLiteCity.dat"
+# Expiration time (in seconds) of the IPs published by a shipper to the topology map.
+# All the IPs will be deleted afterwards. Note, that the value must be higher than
+# refresh_topology_freq. The default is 15 seconds.
+#topology_expire: 15
+
+# Internal queue size for single events in processing pipeline
+#queue_size: 1000
+
+# Sets the maximum number of CPUs that can be executing simultaneously. The
+# default is the number of logical CPUs available in the system.
+#max_procs:
 
 
 ############################# Logging #########################################
 
-# There are three options for the log ouput: syslog, file, stderr.
+# There are three options for the log output: syslog, file, stderr.
 # Under Windows systems, the log files are per default sent to the file output,
 # under all other system per default to syslog.
 logging:

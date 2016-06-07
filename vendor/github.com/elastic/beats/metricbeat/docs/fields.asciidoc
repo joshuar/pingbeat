@@ -9,3 +9,1034 @@ This file is generated! See etc/fields.yml and scripts/generate_field_docs.py
 This document describes the fields that are exported by Metricbeat. They are
 grouped in the following categories:
 
+* <<exported-fields-common>>
+* <<exported-fields-apache>>
+* <<exported-fields-redis>>
+* <<exported-fields-mysql>>
+* <<exported-fields-system>>
+
+[[exported-fields-common]]
+=== Common Fields
+
+Contains common fields available in all event types.
+
+
+
+==== beat.name
+
+The name of the Beat sending the log messages. If the shipper name is set in the configuration file, then that value is used. If it is not set, the hostname is used.
+
+
+==== beat.hostname
+
+The hostname as returned by the operating system on which the Beat is running.
+
+
+==== @timestamp
+
+type: date
+
+example: 2015-01-24 14:06:05.071000
+
+format: YYYY-MM-DDTHH:MM:SS.milliZ
+
+required: True
+
+The timestamp when the log line was read. The precision is in milliseconds. The timezone is UTC.
+
+
+==== module
+
+The name of the module that generated the event.
+
+
+==== metricset
+
+The name of the metricset that generated the event.
+
+
+==== metricset-host
+
+Hostname of the machine from which the metricset was collected. This field may not be present when the data was collected locally.
+
+
+==== rtt
+
+type: long
+
+required: True
+
+Event round trip time in microseconds
+
+
+==== type
+
+example: metricsets
+
+required: True
+
+The document type. Always set to "metricsets".
+
+
+==== tags
+
+Arbitrary tags that can be set per Beat and per transaction type.
+
+
+==== fields
+
+type: dict
+
+Contains user configurable fields.
+
+
+[[exported-fields-apache]]
+=== Apache Status Fields
+
+Apache HTTPD server metrics collected from the mod_status module.
+
+
+
+=== apache-status Fields
+
+`apache-status` contains the metrics that were scraped from the status page.
+
+
+
+==== apache-status.hostname
+
+type: keyword
+
+Apache hostname.
+
+
+==== apache-status.totalAccesses
+
+type: integer
+
+Total number of access requests.
+
+
+==== apache-status.totalKBytes
+
+type: integer
+
+Total number of kilobytes served.
+
+
+==== apache-status.reqPerSec
+
+type: float
+
+Requests per second.
+
+
+==== apache-status.bytesPerSec
+
+type: float
+
+Bytes per second.
+
+
+==== apache-status.bytesPerReq
+
+type: float
+
+Bytes per request.
+
+
+==== apache-status.busyWorkers
+
+type: integer
+
+Number of busy workers.
+
+
+==== apache-status.idleWorkers
+
+type: integer
+
+Number of idle workers.
+
+
+=== uptime Fields
+
+Uptime stats.
+
+
+
+==== apache-status.uptime.serverUptimeSeconds
+
+type: integer
+
+Server uptime in seconds.
+
+
+==== apache-status.uptime.uptime
+
+type: integer
+
+Server uptime.
+
+
+=== cpu Fields
+
+CPU stats.
+
+
+
+==== apache-status.cpu.cpuLoad
+
+type: float
+
+CPU Load.
+
+
+==== apache-status.cpu.cpuUser
+
+type: float
+
+CPU user load.
+
+
+==== apache-status.cpu.cpuSystem
+
+type: float
+
+System cpu.
+
+
+==== apache-status.cpu.cpuChildrenUser
+
+type: float
+
+CPU of children user.
+
+
+==== apache-status.cpu.cpuChildrenSystem
+
+type: float
+
+CPU of children system.
+
+
+=== connections Fields
+
+Connection stats.
+
+
+
+==== apache-status.connections.connsTotal
+
+type: integer
+
+Total connections.
+
+
+==== apache-status.connections.connsAsyncWriting
+
+type: integer
+
+Async connection writing.
+
+
+==== apache-status.connections.connsAsyncKeepAlive
+
+type: integer
+
+Async keeped alive connections.
+
+
+==== apache-status.connections.connsAsyncClosing
+
+type: integer
+
+Async closed connections.
+
+
+=== load Fields
+
+Load averages.
+
+
+
+==== apache-status.load.load1
+
+type: float
+
+Load average for the last minute.
+
+
+==== apache-status.load.load5
+
+type: float
+
+Load average for the last 5 minutes.
+
+
+==== apache-status.load.load15
+
+type: float
+
+Load average for the last 15 minutes.
+
+
+=== scoreboard Fields
+
+Scoreboard metrics.
+
+
+
+==== apache-status.scoreboard.startingUp
+
+type: integer
+
+Starting up.
+
+
+==== apache-status.scoreboard.readingRequest
+
+type: integer
+
+Reading requests.
+
+
+==== apache-status.scoreboard.sendingReply
+
+type: integer
+
+Sending Reply.
+
+
+==== apache-status.scoreboard.keepalive
+
+type: integer
+
+Keep alive.
+
+
+==== apache-status.scoreboard.dnsLookup
+
+type: integer
+
+Dns Lookups.
+
+
+==== apache-status.scoreboard.closingConnection
+
+type: integer
+
+Closing connections.
+
+
+==== apache-status.scoreboard.logging
+
+type: integer
+
+Logging
+
+
+==== apache-status.scoreboard.gracefullyFinishing
+
+type: integer
+
+Gracefully finishing.
+
+
+==== apache-status.scoreboard.idleCleanup
+
+type: integer
+
+Idle cleanups
+
+
+==== apache-status.scoreboard.openSlot
+
+type: integer
+
+Open slots.
+
+
+==== apache-status.scoreboard.waitingForConnection
+
+type: integer
+
+Waiting for connections.
+
+
+==== apache-status.scoreboard.total
+
+type: integer
+
+Total.
+
+
+[[exported-fields-redis]]
+=== Redis Info Fields
+
+Redis metrics collected from the Redis `INFO` command.
+
+
+
+=== redis-info Fields
+
+`redis-info` contains the information and statistics returned by the `INFO` command.
+
+
+
+=== clients Fields
+
+Redis client stats
+
+
+
+==== redis-info.clients.connected_clients
+
+type: integer
+
+Number of client connections (excluding connections from slaves)
+
+
+==== redis-info.clients.client_longest_output_list
+
+type: integer
+
+Longest output list among current client connections.
+
+
+==== redis-info.clients.client_biggest_input_buf
+
+type: integer
+
+Biggest input buffer among current client connections
+
+
+==== redis-info.clients.blocked_clients
+
+type: integer
+
+Number of clients pending on a blocking call (BLPOP, BRPOP, BRPOPLPUSH)
+
+
+=== cluster Fields
+
+Redis cluster information
+
+
+
+==== redis-info.cluster.cluster_enabled
+
+type: boolean
+
+Indicate Redis cluster is enabled
+
+
+=== cpu Fields
+
+Redis CPU stats
+
+
+
+==== redis-info.cpu.used_cpu_sys
+
+type: float
+
+System CPU consumed by the Redis server
+
+
+==== redis-info.cpu.used_cpu_sys_children
+
+type: float
+
+User CPU consumed by the Redis server
+
+
+==== redis-info.cpu.used_cpu_user
+
+type: float
+
+System CPU consumed by the background processes
+
+
+==== redis-info.cpu.used_cpu_user_children
+
+type: float
+
+User CPU consumed by the background processes
+
+
+[[exported-fields-mysql]]
+=== MySQL Status Fields
+
+MySQL server status metrics collected from a `SHOW GLOBAL STATUS` SQL query.
+
+
+
+=== mysql-status Fields
+
+`mysql-status` contains the metrics that were obtained the status SQL query.
+
+
+
+=== aborted Fields
+
+Aborted status fields
+
+
+
+==== mysql-status.aborted.Aborted_clients
+
+type: integer
+
+The number of connections that were aborted because the client died without closing the connection properly.
+
+
+==== mysql-status.aborted.Aborted_connects
+
+type: integer
+
+The number of failed attempts to connect to the MySQL server.
+
+
+=== bytes Fields
+
+Bytes stats
+
+
+
+==== mysql-status.bytes.Bytes_received
+
+type: integer
+
+The number of bytes received from all clients.
+
+
+==== mysql-status.bytes.Bytes_sent
+
+type: integer
+
+The number of bytes sent to all clients.
+
+
+[[exported-fields-system]]
+=== System Status Fields
+
+System status metrics, like CPU and memory usage, that are collected from the operating system.
+
+
+
+=== system-cores Fields
+
+`system-cores` contains local cpu core stats.
+
+
+
+==== system-cores.core
+
+type: integer
+
+CPU Core number.
+
+
+==== system-cores.user
+
+type: integer
+
+The amount of CPU time spent in user space.
+
+
+==== system-cores.user_p
+
+type: float
+
+The percentage of CPU time spent in user space. On multi-core systems, you can have percentages that are greater than 100%. For example, if 3 cores are at 60% use, then the `cpu.user_p` will be 180%.
+
+
+==== system-cores.nice
+
+type: integer
+
+The amount of CPU time spent on low-priority processes.
+
+
+==== system-cores.system
+
+type: integer
+
+The amount of CPU time spent in kernel space.
+
+
+==== system-cores.system_p
+
+type: float
+
+The percentage of CPU time spent in kernel space.
+
+
+==== system-cores.idle
+
+type: integer
+
+The amount of CPU time spent idle.
+
+
+==== system-cores.iowait
+
+type: integer
+
+The amount of CPU time spent in wait (on disk).
+
+
+==== system-cores.irq
+
+type: integer
+
+The amount of CPU time spent servicing and handling hardware interrupts.
+
+
+==== system-cores.softirq
+
+type: integer
+
+The amount of CPU time spent servicing and handling software interrupts.
+
+==== system-cores.steal
+
+type: integer
+
+The amount of CPU time spent in involuntary wait by the virtual CPU while the hypervisor was servicing another processor. Available only on Unix.
+
+
+=== system-cpu Fields
+
+`system-cpu` contains local cpu stats.
+
+
+
+==== system-cpu.user
+
+type: integer
+
+The amount of CPU time spent in user space.
+
+
+==== system-cpu.user_p
+
+type: float
+
+The percentage of CPU time spent in user space. On multi-core systems, you can have percentages that are greater than 100%. For example, if 3 cores are at 60% use, then the `cpu.user_p` will be 180%.
+
+
+==== system-cpu.nice
+
+type: integer
+
+The amount of CPU time spent on low-priority processes.
+
+
+==== system-cpu.system
+
+type: integer
+
+The amount of CPU time spent in kernel space.
+
+
+==== system-cpu.system_p
+
+type: float
+
+The percentage of CPU time spent in kernel space.
+
+
+==== system-cpu.idle
+
+type: integer
+
+The amount of CPU time spent idle.
+
+
+==== system-cpu.iowait
+
+type: integer
+
+The amount of CPU time spent in wait (on disk).
+
+
+==== system-cpu.irq
+
+type: integer
+
+The amount of CPU time spent servicing and handling hardware interrupts.
+
+
+==== system-cpu.softirq
+
+type: integer
+
+The amount of CPU time spent servicing and handling software interrupts.
+
+==== system-cpu.steal
+
+type: integer
+
+The amount of CPU time spent in involuntary wait by the virtual CPU while the hypervisor was servicing another processor. Available only on Unix.
+
+
+=== load Fields
+
+Load averages.
+
+
+
+==== system-cpu.load.load1
+
+type: float
+
+Load average for the last minute.
+
+
+==== system-cpu.load.load5
+
+type: float
+
+Load average for the last 5 minutes.
+
+
+==== system-cpu.load.load15
+
+type: float
+
+Load average for the last 15 minutes.
+
+
+=== system-filesystem Fields
+
+`system-filesystem` contains local filesystem stats
+
+
+
+==== system-filesystem.avail
+
+type: long
+
+The disk space available to an unprivileged user in bytes.
+
+
+==== system-filesystem.device_name
+
+type: keyword
+
+The disk name. For example: `/dev/disk1`
+
+
+==== system-filesystem.mount_point
+
+type: keyword
+
+The mounting point. For example: `/`
+
+
+==== system-filesystem.files
+
+type: long
+
+The total number of file nodes in the file system.
+
+
+==== system-filesystem.free
+
+type: long
+
+The disk space available in bytes.
+
+
+==== system-filesystem.free_files
+
+type: long
+
+The number of free file nodes in the file system.
+
+
+==== system-filesystem.total
+
+type: long
+
+The total disk space in bytes.
+
+
+==== system-filesystem.used
+
+type: long
+
+The used disk space in bytes.
+
+
+==== system-filesystem.used_p
+
+type: float
+
+The percentage of used disk space.
+
+
+=== system-fsstats Fields
+
+`system-fsstats` contains filesystem metrics aggregated from all mounted filesystems.
+
+
+
+==== system-fsstats.count
+
+type: long
+
+Number of file systems found.
+
+==== system-fsstats.total_files
+
+type: long
+
+Total number of files.
+
+=== total_size Fields
+
+Nested file system docs.
+
+
+==== system-fsstats.total_size.free
+
+type: long
+
+Total free space.
+
+
+==== system-fsstats.total_size.used
+
+type: long
+
+Total used space.
+
+
+==== system-fsstats.total_size.total
+
+type: long
+
+Total space (used plus free).
+
+
+=== system-memory Fields
+
+`system-memory` contains local memory stats.
+
+
+
+[float]
+=== mem Fields
+
+This group contains statistics related to the memory usage on the system.
+
+
+==== system-memory.mem.total
+
+type: long
+
+Total memory.
+
+
+==== system-memory.mem.used
+
+type: long
+
+Used memory.
+
+
+==== system-memory.mem.free
+
+type: long
+
+Available memory.
+
+
+==== system-memory.mem.used_p
+
+type: float
+
+The percentage of used memory.
+
+
+==== system-memory.mem.actual_used
+
+type: long
+
+Actual used memory. This value is the "used" memory minus the memory used for disk caches and buffers. Available only on Unix.
+
+
+==== system-memory.mem.actual_free
+
+type: long
+
+Actual available memory. This value is the "free" memory plus the memory used for disk caches and buffers. Available only on Unix.
+
+
+==== system-memory.mem.actual_used_p
+
+type: float
+
+The percentage of actual used memory.
+
+
+[float]
+=== swap Fields
+
+This group contains statistics related to the swap memory usage on the system.
+
+
+==== system-memory.swap.total
+
+type: long
+
+Total swap memory.
+
+
+==== system-memory.swap.used
+
+type: long
+
+Used swap memory.
+
+
+==== system-memory.swap.free
+
+type: long
+
+Available swap memory.
+
+
+==== system-memory.swap.used_p
+
+type: float
+
+The percentage of used swap memory.
+
+
+=== system-process Fields
+
+`system-process` contains process metadata, CPU metrics, and memory metrics.
+
+
+
+==== system-process.name
+
+type: keyword
+
+The process name.
+
+
+==== system-process.state
+
+type: keyword
+
+The process state. For example: "running"
+
+
+==== system-process.pid
+
+type: integer
+
+The process pid.
+
+
+==== system-process.ppid
+
+type: integer
+
+The process parent pid.
+
+
+==== system-process.cmdline
+
+type: keyword
+
+The full command-line used to start the process, including the arguments separated by space.
+
+
+==== system-process.username
+
+type: keyword
+
+The username of the user that created the process. If the username can not be determined then the the field will contain the user's numeric identifier (UID). On Windows, this field includes the user's domain and is formatted as `domain\username`.
+
+
+[float]
+=== cpu Fields
+
+CPU-specific statistics per process.
+
+
+==== system-process.cpu.user
+
+type: long
+
+The amount of CPU time the process spent in user space.
+
+
+==== system-process.cpu.total_p
+
+type: float
+
+The percentage of CPU time spent by the process since the last update. Its value is similar with the %CPU value of the process displayed by the top command on unix systems.
+
+
+==== system-process.cpu.system
+
+type: long
+
+The amount of CPU time the process spent in kernel space.
+
+
+==== system-process.cpu.total
+
+type: long
+
+The total CPU time spent by the process.
+
+
+==== system-process.cpu.start_time
+
+type: keyword
+
+The time when the process was started. Example: "17:45".
+
+
+[float]
+=== mem Fields
+
+Memory-specific statistics per process.
+
+
+==== system-process.mem.size
+
+type: long
+
+The total virtual memory the process has.
+
+
+==== system-process.mem.rss
+
+type: long
+
+The Resident Set Size. The amount of memory the process occupied in main memory (RAM).
+
+
+==== system-process.mem.rss_p
+
+type: float
+
+The percentage of memory the process occupied in main memory (RAM).
+
+
+==== system-process.mem.share
+
+type: long
+
+The shared memory the process uses.
+
+

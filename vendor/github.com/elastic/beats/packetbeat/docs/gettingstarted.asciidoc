@@ -1,19 +1,21 @@
 [[packetbeat-getting-started]]
-== Getting Started
+== Getting Started With Packetbeat
 
 The best way to understand the value of a network packet analytics system like
 Packetbeat is to try it on your own traffic.
 
 To get started with your own Packetbeat setup, install and configure these related products:
 
- * Elasticsearch for storage and indexing the data. {libbeat}/getting-started.html#elasticsearch-installation[More details]
- * Kibana for the UI. {libbeat}/getting-started.html#kibana-installation[More details]
- * Optionally Logstash for inserting data into Elasticsearch. {libbeat}/getting-started.html#logstash-installation[More details]
+ * Elasticsearch for storage and indexing the data.
+ * Kibana for the UI.
+ * Logstash (optional) for inserting data into Elasticsearch.
+
+See {libbeat}/getting-started.html[Getting Started with Beats and the Elastic Stack] for more information.
 
 After you have installed these products, you can start <<packetbeat-installation>>.
 
 [[packetbeat-installation]]
-=== Installing Packetbeat
+=== Step 1: Installing Packetbeat
 
 To download and install Packetbeat on your application servers, use the commands
 that work with your system (<<deb, deb>> for Debian/Ubuntu, <<rpm, rpm>> for
@@ -21,9 +23,9 @@ Redhat/Centos/Fedora, <<mac, mac>> for OS X, and <<win, win>> for Windows).
 
 [NOTE]
 ==================================================
-If you use Apt or Yum, you can {libbeat}/setup-repositories.html[install Packetbeat from our repositories] to update to the newest version more easily. 
+If you use Apt or Yum, you can {libbeat}/setup-repositories.html[install Packetbeat from our repositories] to update to the newest version more easily.
 
-See our https://www.elastic.co/downloads/beats/packetbeat[download page] for other installation options, such as 32-bit images. 
+See our https://www.elastic.co/downloads/beats/packetbeat[download page] for other installation options, such as 32-bit images.
 ==================================================
 
 [[deb]]
@@ -79,14 +81,14 @@ PS > cd 'C:\Program Files\Packetbeat'
 PS C:\Program Files\Packetbeat> .\install-service-packetbeat.ps1
 ----------------------------------------------------------------------
 
-NOTE: If script execution is disabled on your system, you need to set the execution policy for the current session to allow the script to run. For example: `PowerShell.exe -ExecutionPolicy UnRestricted -File .\install-service-packetbeat.ps1`. 
+NOTE: If script execution is disabled on your system, you need to set the execution policy for the current session to allow the script to run. For example: `PowerShell.exe -ExecutionPolicy UnRestricted -File .\install-service-packetbeat.ps1`.
 
 Before starting Packetbeat, you should look at the configuration options in the
 configuration file, for example `C:\Program Files\Packetbeat\packetbeat.yml` or `/etc/packetbeat/packetbeat.yml`. For
 more information about these options, see <<packetbeat-configuration>>.
 
 [[configuring-packetbeat]]
-=== Configuring Packetbeat
+=== Step 2: Configuring Packetbeat
 
 To configure Packetbeat, you edit the configuration file. For rpm and deb, you'll
 find the configuration file at `/etc/packetbeat/packetbeat.yml`. For mac and win, look in
@@ -104,7 +106,7 @@ server on which Packetbeat is installed. For this, use `any` as the device:
 ----------------------------------------------------------------------
 # Select the network interfaces to sniff the data. You can use the "any"
 # keyword to sniff on all connected interfaces.
-interfaces:
+packetbeat.interfaces:
   device: any
 ----------------------------------------------------------------------
 
@@ -129,7 +131,7 @@ Modify the `device` line to point to the index of the device:
 +
 [source,yml]
 ----------------------------------------------------------------------
-interfaces:
+packetbeat.interfaces:
   device: 0
 ----------------------------------------------------------------------
 
@@ -139,13 +141,13 @@ default values should do just fine.
 +
 [source,yaml]
 ----------------------------------------------------------------------
-protocols:
+packetbeat.protocols:
   dns:
     ports: [53]
-    
+
     include_authorities: true
     include_additionals: true
-    
+
   http:
     ports: [80, 8080, 8081, 5000, 8002]
 
@@ -154,7 +156,7 @@ protocols:
 
   mysql:
     ports: [3306]
-    
+
   pgsql:
     ports: [5432]
 
@@ -163,7 +165,7 @@ protocols:
 
   thrift:
     ports: [9090]
-    
+
   mongodb:
     ports: [27017]
 ----------------------------------------------------------------------
@@ -182,55 +184,15 @@ output:
      hosts: ["192.168.1.42:9200"]
 ----------------------------------------------------------------------
 +
-If you are sending output to Logstash, see <<config-filebeat-logstash>> instead.
-
-[[config-filebeat-logstash]]
-=== Configuring Packetbeat to Use Logstash
-
-include::../../libbeat/docs/shared-logstash-config.asciidoc[]
+If you are sending output to Logstash, see <<config-packetbeat-logstash>> instead.
 
 [[packetbeat-template]]
-=== Loading the Index Template in Elasticsearch
+=== Step 3: Loading the Index Template in Elasticsearch
 
-Before starting Packetbeat, you need to load the
-http://www.elastic.co/guide/en/elasticsearch/reference/current/indices-templates.html[index
-template], which lets Elasticsearch know which fields should be analyzed
-in which way.
+:allplatforms:
+include::../../libbeat/docs/shared-template-load.asciidoc[]
 
-The recommended template file is installed by the Packetbeat packages. Load it with the
-following command:
-
-*deb or rpm:*
-
-[source,shell]
-----------------------------------------------------------------------
-curl -XPUT 'http://localhost:9200/_template/packetbeat' -d@/etc/packetbeat/packetbeat.template.json
-----------------------------------------------------------------------
-
-*mac:*
-
-["source","sh",subs="attributes,callouts"]
-----------------------------------------------------------------------
-cd packetbeat-{version}-darwin
-curl -XPUT 'http://localhost:9200/_template/packetbeat' -d@packetbeat.template.json
-----------------------------------------------------------------------
-
-*win:*
-
-["source","sh",subs="attributes,callouts"]
-----------------------------------------------------------------------
-PS C:\Program Files\Packetbeat> Invoke-WebRequest -Method Put -InFile packetbeat.template.json -Uri http://localhost:9200/_template/packetbeat?pretty
-----------------------------------------------------------------------
-
-where `localhost:9200` is the IP and port where Elasticsearch is listening.
-
-NOTE: If you've already used Packetbeat to index data into Elasticsearch,
-the index may contain old documents. After you load the index template,
-you can delete the old documents from `packetbeat-*` to force Kibana to look
-at the newest documents. Use this command:
-`curl -XDELETE 'http://localhost:9200/packetbeat-*'`.
-
-=== Running Packetbeat
+=== Step 4: Starting Packetbeat
 
 Run Packetbeat by issuing the following command:
 
@@ -264,6 +226,7 @@ PS C:\Program Files\Packetbeat> Start-Service packetbeat
 
 By default the log files are stored in `C:\ProgramData\packetbeat\Logs`.
 
+[float]
 === Testing the Packetbeat Installation
 
 Packetbeat is now ready to capture data from your network traffic. You can test
@@ -284,21 +247,15 @@ curl -XGET 'http://localhost:9200/packetbeat-*/_search?pretty'
 Make sure that you replace `localhost:9200` with the address of your Elasticsearch
 instance. The command should return data about the HTTP transaction you just created.
 
-=== Loading Sample Kibana Dashboards
+=== Step 5: Loading Sample Kibana Dashboards
 
 To make it easier for you to get application performance insights
-from packet data, we have created a few sample dashboards. The
-dashboards are maintained in this
-https://github.com/elastic/beats-dashboards[GitHub repository], which also
-includes instructions for loading the dashboards.
-
-You can load all of the sample dashboards automatically by following {libbeat}/getting-started.html#load-kibana-dashboards[these steps].
-
-
-image:./images/packetbeat-statistics.png[Packetbeat statistics]
-
-These dashboards are provided as examples. We recommend that you
-http://www.elastic.co/guide/en/kibana/current/dashboard.html[customize] them
+from packet data, we have created a sample Packetbeat dashboard. This dashboard is provided as
+an example. We recommend that you
+http://www.elastic.co/guide/en/kibana/current/dashboard.html[customize] it
 to meet your needs.
 
-Enjoy!
+For more information, see
+{libbeat}/load-kibana-dashboards.html[Loading the Beats Dashboards].
+
+image:./images/packetbeat-statistics.png[Packetbeat statistics]

@@ -6,7 +6,7 @@ services:
 language: go
 
 go:
-  - 1.5.3
+  - 1.6.2
 
 os:
   - linux
@@ -18,15 +18,15 @@ env:
     - TARGETS="-C libbeat testsuite"
     - TARGETS="-C topbeat testsuite"
     - TARGETS="-C filebeat testsuite"
-    - TARGETS="-C winlogbeat testsuite"
     - TARGETS="-C packetbeat testsuite"
     - TARGETS="-C metricbeat testsuite"
     - TARGETS="-C libbeat crosscompile"
+    - TARGETS="-C metricbeat crosscompile"
     - TARGETS="-C winlogbeat crosscompile"
   global:
     # Cross-compile for amd64 only to speed up testing.
     - GOX_FLAGS="-arch amd64"
-    - DOCKER_COMPOSE_VERSION: 1.5.2
+    - DOCKER_COMPOSE_VERSION: 1.7.0
 
 matrix:
   exclude:
@@ -37,7 +37,7 @@ matrix:
     - os: osx
       env: TARGETS="-C libbeat crosscompile"
     - os: osx
-      env: TARGETS="-C winlogbeat testsuite"
+      env: TARGETS="-C metricbeat crosscompile"
     - os: osx
       env: TARGETS="-C winlogbeat crosscompile"
     - os: osx
@@ -58,6 +58,12 @@ addons:
       - geoip-database
 
 before_install:
+  # Update to most recent docker version
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+      sudo apt-get update;
+      sudo apt-cache search docker;
+      sudo apt-get -o Dpkg::Options::="--force-confnew" install -y docker-engine;
+    fi
   # Redo the travis setup but with the elastic/beats path. This is needed so the package path is correct also for forks
   - mkdir -p $HOME/gopath/src/github.com/elastic/beats/
   - rsync -az ${TRAVIS_BUILD_DIR}/ $HOME/gopath/src/github.com/elastic/beats/
@@ -86,4 +92,4 @@ after_success:
   - test -f packetbeat/build/coverage/full.cov && bash <(curl -s https://codecov.io/bash) -f packetbeat/build/coverage/full.cov
   - test -f topbeat/build/coverage/full.cov && bash <(curl -s https://codecov.io/bash) -f topbeat/build/coverage/full.cov
   - test -f libbeat/build/coverage/full.cov && bash <(curl -s https://codecov.io/bash) -f libbeat/build/coverage/full.cov
-  - test -f winlogbeat/build/coverage/full.cov && bash <(curl -s https://codecov.io/bash) -f winlogbeat/build/coverage/full.cov
+  - test -f metricbeat/build/coverage/full.cov && bash <(curl -s https://codecov.io/bash) -f metricbeat/build/coverage/full.cov

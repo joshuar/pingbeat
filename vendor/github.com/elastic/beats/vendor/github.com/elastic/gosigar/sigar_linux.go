@@ -1,6 +1,6 @@
 // Copyright (c) 2012 VMware, Inc.
 
-package sigar
+package gosigar
 
 import (
 	"bufio"
@@ -211,6 +211,8 @@ func (self *ProcState) Get(pid int) error {
 	self.State = RunState(fields[0][0])
 
 	self.Ppid, _ = strconv.Atoi(fields[1])
+
+	self.Pgid, _ = strconv.Atoi(fields[2])
 
 	self.Tty, _ = strconv.Atoi(fields[4])
 

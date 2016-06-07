@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,11 +11,12 @@ import (
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/paths"
 )
 
 // Defaults for config variables which are not set
 const (
-	DefaultRegistryFile                      = ".filebeat"
+	DefaultRegistryFile                      = "registry"
 	DefaultIgnoreOlderDuration time.Duration = 0
 	DefaultCloseOlderDuration  time.Duration = 1 * time.Hour
 	DefaultScanFrequency       time.Duration = 10 * time.Second
@@ -37,53 +39,60 @@ type Config struct {
 
 type FilebeatConfig struct {
 	Prospectors  []ProspectorConfig
-	SpoolSize    uint64        `yaml:"spool_size"`
-	PublishAsync bool          `yaml:"publish_async"`
-	IdleTimeout  time.Duration `yaml:"idle_timeout"`
-	RegistryFile string        `yaml:"registry_file"`
-	ConfigDir    string        `yaml:"config_dir"`
+	SpoolSize    uint64        `config:"spool_size"`
+	PublishAsync bool          `config:"publish_async"`
+	IdleTimeout  time.Duration `config:"idle_timeout"`
+	RegistryFile string        `config:"registry_file"`
+	ConfigDir    string        `config:"config_dir"`
 }
 
 type ProspectorConfig struct {
-	ExcludeFiles          []string `yaml:"exclude_files"`
-	ExcludeFilesRegexp    []*regexp.Regexp
-	Harvester             HarvesterConfig `yaml:",inline"`
+	ExcludeFiles          []*regexp.Regexp `config:"exclude_files"`
+	Harvester             HarvesterConfig  `config:",inline"`
 	Input                 string
-	IgnoreOlder           string `yaml:"ignore_older"`
+	IgnoreOlder           string `config:"ignore_older"`
 	IgnoreOlderDuration   time.Duration
 	Paths                 []string
-	ScanFrequency         string `yaml:"scan_frequency"`
+	ScanFrequency         string `config:"scan_frequency"`
 	ScanFrequencyDuration time.Duration
 }
 
 type HarvesterConfig struct {
-	BufferSize         int    `yaml:"harvester_buffer_size"`
-	DocumentType       string `yaml:"document_type"`
-	Encoding           string `yaml:"encoding"`
-	Fields             common.MapStr
-	FieldsUnderRoot    bool   `yaml:"fields_under_root"`
-	InputType          string `yaml:"input_type"`
-	TailFiles          bool   `yaml:"tail_files"`
-	Backoff            string `yaml:"backoff"`
+	common.EventMetadata `config:",inline"` // Fields and tags to add to events.
+
+	BufferSize         int    `config:"harvester_buffer_size"`
+	DocumentType       string `config:"document_type"`
+	Encoding           string `config:"encoding"`
+	InputType          string `config:"input_type"`
+	TailFiles          bool   `config:"tail_files"`
+	Backoff            string `config:"backoff"`
 	BackoffDuration    time.Duration
-	BackoffFactor      int    `yaml:"backoff_factor"`
-	MaxBackoff         string `yaml:"max_backoff"`
+	BackoffFactor      int    `config:"backoff_factor"`
+	MaxBackoff         string `config:"max_backoff"`
 	MaxBackoffDuration time.Duration
-	CloseOlder         string `yaml:"close_older"`
+	CloseOlder         string `config:"close_older"`
 	CloseOlderDuration time.Duration
-	ForceCloseFiles    bool             `yaml:"force_close_files"`
-	ExcludeLines       []string         `yaml:"exclude_lines"`
-	IncludeLines       []string         `yaml:"include_lines"`
-	MaxBytes           int              `yaml:"max_bytes"`
-	Multiline          *MultilineConfig `yaml:"multiline"`
+	ForceCloseFiles    bool             `config:"force_close_files"`
+	ExcludeLines       []*regexp.Regexp `config:"exclude_lines"`
+	IncludeLines       []*regexp.Regexp `config:"include_lines"`
+	MaxBytes           int              `config:"max_bytes"`
+	Multiline          *MultilineConfig `config:"multiline"`
+	JSON               *JSONConfig      `config:"json"`
+}
+
+type JSONConfig struct {
+	MessageKey    string `config:"message_key"`
+	KeysUnderRoot bool   `config:"keys_under_root"`
+	OverwriteKeys bool   `config:"overwrite_keys"`
+	AddErrorKey   bool   `config:"add_error_key"`
 }
 
 type MultilineConfig struct {
-	Negate   bool   `yaml:"negate"`
-	Match    string `yaml:"match"`
-	MaxLines *int   `yaml:"max_lines"`
-	Pattern  string `yaml:"pattern"`
-	Timeout  string `yaml:"timeout"`
+	Negate   bool           `config:"negate"`
+	Match    string         `config:"match"       validate:"required"`
+	MaxLines *int           `config:"max_lines"`
+	Pattern  *regexp.Regexp `config:"pattern"`
+	Timeout  *time.Duration `config:"timeout"     validate:"positive"`
 }
 
 const (
@@ -95,6 +104,13 @@ const (
 var ValidInputType = map[string]struct{}{
 	StdinInputType: {},
 	LogInputType:   {},
+}
+
+func (c *MultilineConfig) Validate() error {
+	if c.Match != "after" && c.Match != "before" {
+		return fmt.Errorf("unknown matcher type: %s", c.Match)
+	}
+	return nil
 }
 
 // getConfigFiles returns list of config files.
@@ -152,6 +168,9 @@ func (config *Config) FetchConfigs() {
 	if configDir == "" {
 		return
 	}
+
+	// If configDir is relative, consider it relative to the config path
+	configDir = paths.Resolve(paths.Config, configDir)
 
 	// Check if optional configDir is set to fetch additional config files
 	logp.Info("Additional config files are fetched from: %s", configDir)

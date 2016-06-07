@@ -1,10 +1,14 @@
 [[beats-reference]]
 = Beats Platform Reference
-:ES-version: 2.2.0
-:LS-version: 2.2.0
-:Kibana-version: 4.4.0
-:Dashboards-version: 1.1.1
-
+:packetbeat: http://www.elastic.co/guide/en/beats/packetbeat/master
+:topbeat: http://www.elastic.co/guide/en/beats/topbeat/master
+:filebeat: http://www.elastic.co/guide/en/beats/filebeat/master
+:winlogbeat: http://www.elastic.co/guide/en/beats/winlogbeat/master
+:security: X-Pack Security
+:ES-version: 5.0.0-alpha2
+:LS-version: 5.0.0-alpha2
+:Kibana-version: 5.0.0-alpha2
+:Dashboards-version: 5.0.0-alpha2
 
 include::./overview.asciidoc[]
 
@@ -12,12 +16,16 @@ include::./communitybeats.asciidoc[]
 
 include::./gettingstarted.asciidoc[]
 
-include::./configuration.asciidoc[]
+include::./installing-beats.asciidoc[]
 
-include::./command-line.asciidoc[]
+include::./repositories.asciidoc[]
+
+include::./visualizing-data.asciidoc[]
+
+include::./dashboards.asciidoc[]
 
 include::./newbeat.asciidoc[]
 
-include::./repositories.asciidoc[]
+include::./newdashboards.asciidoc[]
 
 include::./release.asciidoc[]

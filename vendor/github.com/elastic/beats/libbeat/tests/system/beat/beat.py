@@ -11,6 +11,9 @@ import time
 import yaml
 from datetime import datetime, timedelta
 
+BEAT_REQUIRED_FIELDS = ["@timestamp", "type",
+                        "beat.name", "beat.hostname"]
+
 
 class Proc(object):
     """
@@ -22,7 +25,7 @@ class Proc(object):
 
     def __init__(self, args, outputfile):
         self.args = args
-        self.output = open(outputfile, "wb")
+        self.output = open(outputfile, "ab")
 
     def start(self):
         self.stdin_read, self.stdin_write = os.pipe()
@@ -57,7 +60,10 @@ class Proc(object):
             self.proc.terminate()
 
     def wait(self):
-        return self.proc.wait()
+        try:
+            return self.proc.wait()
+        finally:
+            self.output.close()
 
     def check_wait(self, exit_code=0):
         actual_exit_code = self.wait()
@@ -67,7 +73,7 @@ class Proc(object):
     def kill_and_wait(self):
         self.kill()
         os.close(self.stdin_write)
-        return self.proc.wait()
+        return self.wait()
 
     def check_kill_and_wait(self, exit_code=0):
         self.kill()
@@ -89,7 +95,6 @@ class Proc(object):
 
 
 class TestCase(unittest.TestCase):
-
     @classmethod
     def setUpClass(self):
 
@@ -107,51 +112,31 @@ class TestCase(unittest.TestCase):
         if not hasattr(self, 'beat_path'):
             self.beat_path = "../../" + self.beat_name + ".test"
 
-
-    def run_beat(self, cmd=None,
+    def run_beat(self,
+                 cmd=None,
                  config=None,
                  output=None,
-                 extra_args=[]):
+                 logging_args=["-e", "-v", "-d", "*"],
+                 extra_args=[],
+                 exit_code=None):
         """
-        Executes beat
+        Executes beat.
         Waits for the process to finish before returning to
         the caller.
         """
+        proc = self.start_beat(cmd=cmd, config=config, output=output,
+                               logging_args=logging_args,
+                               extra_args=extra_args)
+        if exit_code != None:
+            return proc.check_wait(exit_code)
 
-        # Init defaults
-        if cmd is None:
-            cmd = self.beat_path
-
-        if config is None:
-            config = self.beat_name + ".yml"
-
-        if output is None:
-            output = self.beat_name + ".log"
-
-        args = [cmd]
-
-        args.extend(["-e",
-                     "-c", os.path.join(self.working_dir, config),
-                     "-systemTest",
-                     "-v",
-                     "-d", "*",
-                     "-test.coverprofile", os.path.join(
-                         self.working_dir, "coverage.cov")
-                     ])
-
-        if extra_args:
-            args.extend(extra_args)
-
-        with open(os.path.join(self.working_dir, output), "wb") as outputfile:
-            proc = subprocess.Popen(args,
-                                    stdout=outputfile,
-                                    stderr=subprocess.STDOUT)
-            return proc.wait()
+        return proc.wait()
 
     def start_beat(self,
                    cmd=None,
                    config=None,
                    output=None,
+                   logging_args=["-e", "-v", "-d", "*"],
                    extra_args=[]):
         """
         Starts beat and returns the process handle. The
@@ -170,14 +155,14 @@ class TestCase(unittest.TestCase):
             output = self.beat_name + ".log"
 
         args = [cmd,
-                "-e",
-                "-c", os.path.join(self.working_dir, config),
                 "-systemTest",
-                "-v",
-                "-d", "*",
-                "-test.coverprofile", os.path.join(
-                    self.working_dir, "coverage.cov")
+                "-test.coverprofile",
+                os.path.join(self.working_dir, "coverage.cov"),
+                "-c", os.path.join(self.working_dir, config)
                 ]
+
+        if logging_args:
+            args.extend(logging_args)
 
         if extra_args:
             args.extend(extra_args)
@@ -203,7 +188,10 @@ class TestCase(unittest.TestCase):
         with open(os.path.join(self.working_dir, output), "wb") as f:
             f.write(output_str)
 
-    def read_output(self, output_file=None):
+    # Returns output as JSON object with flattened fields (. notation)
+    def read_output(self,
+                    output_file=None,
+                    required_fields=None):
 
         # Init defaults
         if output_file is None:
@@ -212,11 +200,34 @@ class TestCase(unittest.TestCase):
         jsons = []
         with open(os.path.join(self.working_dir, output_file), "r") as f:
             for line in f:
-                jsons.append(self.flatten_object(json.loads(line),
-                                                 []))
-        self.all_have_fields(jsons, ["@timestamp", "type",
-                                     "beat.name", "beat.hostname",
-                                     "count"])
+                if len(line) == 0 or line[len(line)-1] != "\n":
+                    # hit EOF
+                    break
+
+                try:
+                    jsons.append(self.flatten_object(json.loads(line), []))
+                except:
+                    print("Fail to load the json {}".format(line))
+                    raise
+
+        self.all_have_fields(jsons, required_fields or BEAT_REQUIRED_FIELDS)
+        return jsons
+
+    # Returns output as JSON object
+    def read_output_json(self, output_file=None):
+
+        # Init defaults
+        if output_file is None:
+            output_file = "output/" + self.beat_name
+
+        jsons = []
+        with open(os.path.join(self.working_dir, output_file), "r") as f:
+            for line in f:
+                if len(line) == 0 or line[len(line)-1] != "\n":
+                    # hit EOF
+                    break
+
+                jsons.append(json.loads(line))
         return jsons
 
     def copy_files(self, files, source_dir="files/"):
@@ -231,7 +242,8 @@ class TestCase(unittest.TestCase):
         )
 
         # create working dir
-        self.working_dir = os.path.join(self.build_path + "run", self.id())
+        self.working_dir = os.path.abspath(os.path.join(
+            self.build_path + "run", self.id()))
         if os.path.exists(self.working_dir):
             shutil.rmtree(self.working_dir)
         os.makedirs(self.working_dir)
@@ -264,11 +276,32 @@ class TestCase(unittest.TestCase):
                                 "Waited {} seconds.".format(max_timeout))
             time.sleep(poll_interval)
 
+    def get_log(self, logfile=None):
+        """
+        Returns the log as a string.
+        """
+        if logfile is None:
+            logfile = self.beat_name + ".log"
+
+        with open(os.path.join(self.working_dir, logfile), 'r') as f:
+            data=f.read()
+
+        return data
+
     def log_contains(self, msg, logfile=None):
         """
         Returns true if the give logfile contains the given message.
         Note that the msg must be present in a single line.
         """
+
+        return self.log_contains_count(msg, logfile) > 0
+
+    def log_contains_count(self, msg, logfile=None):
+        """
+        Returns the number of appearances of the given string in the log file
+        """
+
+        counter = 0
 
         # Init defaults
         if logfile is None:
@@ -278,10 +311,22 @@ class TestCase(unittest.TestCase):
             with open(os.path.join(self.working_dir, logfile), "r") as f:
                 for line in f:
                     if line.find(msg) >= 0:
-                        return True
-                return False
+                        counter = counter + 1
         except IOError:
-            return False
+            counter = -1
+
+        return counter
+
+    def output_lines(self, output_file=None):
+        """ Count number of lines in a file."""
+        if output_file is None:
+            output_file = "output/" + self.beat_name
+
+        try:
+            with open(os.path.join(self.working_dir, output_file), "r") as f:
+                return sum([1 for line in f])
+        except IOError:
+            return 0
 
     def output_has(self, lines, output_file=None):
         """
@@ -338,18 +383,25 @@ class TestCase(unittest.TestCase):
 
         Reads these lists from the fields documentation.
         """
-        def extract_fields(doc_list):
+        def extract_fields(doc_list, name):
             fields = []
             dictfields = []
             for field in doc_list:
+
+                # Chain together names
+                if name != "":
+                    newName = name + "." + field["name"]
+                else:
+                    newName = field["name"]
+
                 if field.get("type") == "group":
-                    subfields, subdictfields = extract_fields(field["fields"])
+                    subfields, subdictfields = extract_fields(field["fields"], newName)
                     fields.extend(subfields)
                     dictfields.extend(subdictfields)
                 else:
-                    fields.append(field["name"])
+                    fields.append(newName)
                     if field.get("type") == "dict":
-                        dictfields.append(field["name"])
+                        dictfields.append(newName)
             return fields, dictfields
 
         with open(fields_doc, "r") as f:
@@ -359,7 +411,7 @@ class TestCase(unittest.TestCase):
             for key, value in doc.items():
                 if isinstance(value, dict) and \
                         value.get("type") == "group":
-                    subfields, subdictfields = extract_fields(value["fields"])
+                    subfields, subdictfields = extract_fields(value["fields"], "")
                     fields.extend(subfields)
                     dictfields.extend(subdictfields)
             return fields, dictfields

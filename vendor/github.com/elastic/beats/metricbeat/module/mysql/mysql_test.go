@@ -1,3 +1,5 @@
+// +build !integration
+
 package mysql
 
 import (
@@ -6,15 +8,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConnect(t *testing.T) {
+func TestCreateDSN(t *testing.T) {
+	hostname := "tcp(127.0.0.1:3306)/"
+	username := "root"
+	password := "test"
 
-	if testing.Short() {
-		t.Skip("Skipping in short mode, because it requires MySQL")
-	}
+	dsn := CreateDSN(hostname, username, password)
+	assert.Equal(t, "root:test@tcp(127.0.0.1:3306)/", dsn)
 
-	db, err := Connect(GetMySQLEnvDSN())
-	assert.NoError(t, err)
+	dsn = CreateDSN(hostname, username, "")
+	assert.Equal(t, "root@tcp(127.0.0.1:3306)/", dsn)
 
-	err = db.Ping()
-	assert.NoError(t, err)
+	dsn = CreateDSN(hostname, "", "")
+	assert.Equal(t, "tcp(127.0.0.1:3306)/", dsn)
 }

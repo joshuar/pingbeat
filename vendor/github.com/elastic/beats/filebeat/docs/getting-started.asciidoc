@@ -1,16 +1,18 @@
 [[filebeat-getting-started]]
-== Getting Started
+== Getting Started With Filebeat
 
 To get started with your own Filebeat setup, install and configure these related products:
 
- * Elasticsearch for storage and indexing the data. {libbeat}/getting-started.html#elasticsearch-installation[More details]
- * Kibana for the UI. {libbeat}/getting-started.html#kibana-installation[More details]
- * Optionally Logstash for inserting data into Elasticsearch. {libbeat}/getting-started.html#logstash-installation[More details]
+ * Elasticsearch for storage and indexing the data.
+ * Kibana for the UI.
+ * Logstash (optional) for inserting data into Elasticsearch.
+
+See {libbeat}/getting-started.html[Getting Started with Beats and the Elastic Stack] for more information.
 
 After you have installed these products, you can start <<filebeat-installation>>.
 
 [[filebeat-installation]]
-=== Installing Filebeat
+=== Step 1: Installing Filebeat
 
 To download and install Filebeat, use the commands that work with your system
 (<<deb, deb>> for Debian/Ubuntu, <<rpm, rpm>> for Redhat/Centos/Fedora, <<mac,
@@ -18,9 +20,9 @@ mac>> for OS X, and <<win, win>> for Windows).
 
 [NOTE]
 ==================================================
-If you use Apt or Yum, you can {libbeat}/setup-repositories.html[install Filebeat from our repositories] to update to the newest version more easily. 
+If you use Apt or Yum, you can {libbeat}/setup-repositories.html[install Filebeat from our repositories] to update to the newest version more easily.
 
-See our https://www.elastic.co/downloads/beats/filebeat[download page] for other installation options, such as 32-bit images. 
+See our https://www.elastic.co/downloads/beats/filebeat[download page] for other installation options, such as 32-bit images.
 ==================================================
 
 [[deb]]
@@ -70,21 +72,21 @@ PS > cd 'C:\Program Files\Filebeat'
 PS C:\Program Files\Filebeat> .\install-service-filebeat.ps1
 ----------------------------------------------------------------------
 
-NOTE: If script execution is disabled on your system, you need to set the execution policy for the current session to allow the script to run. For example: `PowerShell.exe -ExecutionPolicy UnRestricted -File .\install-service-filebeat.ps1`. 
+NOTE: If script execution is disabled on your system, you need to set the execution policy for the current session to allow the script to run. For example: `PowerShell.exe -ExecutionPolicy UnRestricted -File .\install-service-filebeat.ps1`.
 
 Before starting Filebeat, you should look at the configuration options in the configuration
 file, for example `C:\Program Files\Filebeat\filebeat.yml` or `/etc/filebeat/filebeat.yml`. For more information about these options,
 see <<filebeat-configuration-details>>.
 
 [[filebeat-configuration]]
-=== Configuring Filebeat
+=== Step 2: Configuring Filebeat
 
 To configure Filebeat, you edit the configuration file. For rpm and deb, you'll
 find the configuration file at `/etc/filebeat/filebeat.yml`. For mac and win, look in
 the archive that you just extracted.
 
 Here is a sample of the `filebeat` section of the `filebeat.yml` file. Filebeat uses predefined
-default values for most configuration options. 
+default values for most configuration options.
 
 [source,yaml]
 -------------------------------------------------------------------------------------
@@ -92,12 +94,6 @@ filebeat:
   # List of prospectors to fetch data.
   prospectors:
     # Each - is a prospector. Below are the prospector specific configurations
-    -
-      # Paths that should be crawled and fetched. Glob based paths.
-      # For each file found under this path, a harvester is started.
-      paths:
-        - "/var/log/*.log"
-        #- c:\programdata\elasticsearch\logs\*
 
       # Type of the files. Based on this the way the file is read is decided.
       # The different types cannot be mixed in one prospector
@@ -105,7 +101,16 @@ filebeat:
       # Possible options are:
       # * log: Reads every line of the log file (default)
       # * stdin: Reads the standard in
-      input_type: log
+    - input_type: log
+
+      # Paths that should be crawled and fetched. Glob based paths.
+      # For each file found under this path, a harvester is started.
+      paths:
+        - "/var/log/*.log"
+        #- c:\programdata\elasticsearch\logs\*
+
+
+
 -------------------------------------------------------------------------------------
 
 To configure Filebeat:
@@ -118,7 +123,7 @@ For the most basic Filebeat configuration, you can define a single prospector wi
 -------------------------------------------------------------------------------------
 filebeat:
   prospectors:
-    -
+    - input_type: log
       paths:
         - "/var/log/*.log"
 -------------------------------------------------------------------------------------
@@ -131,29 +136,6 @@ To fetch all files from a predefined level of subdirectories, the following patt
 `/var/log/*/*.log`. This fetches all `.log` files from the subfolders of `/var/log`. It does not
 fetch log files from the `/var/log` folder itself. Currently it is not possible to recursively
 fetch all files in all subdirectories of a directory.
-+
-A config file can contain multiple prospectors and multiple paths per prospector
-as shown in the following example.
-+
-NOTE: Make sure a file is not defined more than once across all prospectors because this can lead
-to unexpected behaviour.
-+
-[source,yaml]
--------------------------------------------------------------------------------------
-filebeat:
-  prospectors:
-    -
-      paths:
-        - /var/log/system.log
-        - /var/log/wifi.log
-    -
-      paths:
-        - "/var/log/apache2/*"
--------------------------------------------------------------------------------------
-+
-The config file in the example starts two prospectors. The first prospector has two harvesters,
-one harvesting the `system.log` file, and the other harvesting `wifi.log`. The second prospector
-starts a harvester for each file in the apache directory.
 
 . If you are sending output to Elasticsearch, set the IP address and port where Filebeat can find the Elasticsearch installation:
 +
@@ -173,54 +155,19 @@ If you are sending output to Logstash, see <<config-filebeat-logstash>> instead.
 See <<filebeat-configuration-details>> for more details about each configuration option.
 
 [[config-filebeat-logstash]]
-=== Configuring Filebeat to Use Logstash
+=== Step 3 (Optional): Configuring Filebeat to Use Logstash
 
 include::../../libbeat/docs/shared-logstash-config.asciidoc[]
 
 [[filebeat-template]]
-=== Loading the Index Template in Elasticsearch
+=== Step 4: Loading the Index Template in Elasticsearch
 
-Before starting Filebeat, you need to load the
-http://www.elastic.co/guide/en/elasticsearch/reference/current/indices-templates.html[index
-template], which lets Elasticsearch know which fields should be analyzed
-in which way.
+:allplatforms:
+include::../../libbeat/docs/shared-template-load.asciidoc[]
 
-The recommended template file is installed by the Filebeat packages. Load it with the
-following command:
+=== Step 5: Starting Filebeat
 
-*deb or rpm:*
-
-[source,shell]
-----------------------------------------------------------------------
-curl -XPUT 'http://localhost:9200/_template/filebeat?pretty' -d@/etc/filebeat/filebeat.template.json
-----------------------------------------------------------------------
-
-*mac:*
-
-["source","sh",subs="attributes,callouts"]
-----------------------------------------------------------------------
-cd filebeat-{version}-darwin
-curl -XPUT 'http://localhost:9200/_template/filebeat?pretty' -d@filebeat.template.json
-----------------------------------------------------------------------
-
-*win:*
-
-["source","sh",subs="attributes,callouts"]
-----------------------------------------------------------------------
-PS C:\Program Files\Filebeat> Invoke-WebRequest -Method Put -InFile filebeat.template.json -Uri http://localhost:9200/_template/filebeat?pretty
-----------------------------------------------------------------------
-
-where `localhost:9200` is the IP and port where Elasticsearch is listening.
-
-NOTE: If you've already used Filebeat to index data into Elasticsearch,
-the index may contain old documents. After you load the index template,
-you can delete the old documents from `filebeat-*` to force Kibana to look
-at the newest documents. Use this command:
-`curl -XDELETE 'http://localhost:9200/filebeat-*'`.
-
-=== Running Filebeat
-
-Run Filebeat by issuing the appropriate command for your platform.
+Start Filebeat by issuing the appropriate command for your platform.
 
 *deb:*
 
@@ -254,4 +201,16 @@ By default, Windows log files are stored in `C:\ProgramData\filebeat\Logs`.
 
 Filebeat is now ready to send log files to your defined output.
 
-Enjoy!
+=== Step 6: Loading the Kibana Index Pattern
+
+We don't offer prebuilt dashboards for visualizing Filebeat data. However, to make it easier for you to explore Filebeat
+data in Kibana, we've created a Filebeat index pattern: `filebeat-*`. To load this pattern, you can use the script
+that's provided for loading dashboards. 
+
+For more information about running the script, see
+{libbeat}/load-kibana-dashboards.html[Loading the Beats Dashboards].
+
+After you've created the index pattern, you can select the `filebeat-*` index pattern in Kibana to explore
+Filebeat data. 
+
+image:./images/filebeat-discover-tab.png[]

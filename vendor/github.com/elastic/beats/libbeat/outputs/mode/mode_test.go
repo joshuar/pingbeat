@@ -1,12 +1,14 @@
+// +build !integration
+
 package mode
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/op"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/outputs"
 	"github.com/stretchr/testify/assert"
@@ -215,7 +217,12 @@ func testMode(
 	expectedSignals []bool,
 	collectedEvents *[][]common.MapStr,
 ) {
-	defer mode.Close()
+	defer func() {
+		err := mode.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
 
 	if events == nil {
 		return
@@ -231,8 +238,8 @@ func testMode(
 	}
 
 	var expectedEvents [][]common.MapStr
-	ch := make(chan bool, numSignals)
-	signal := outputs.NewChanSignal(ch)
+	ch := make(chan op.SignalResponse, numSignals)
+	signal := &op.SignalChannel{ch}
 	idx := 0
 	for _, pubEvents := range events {
 		if pubEvents.single {
@@ -254,7 +261,7 @@ func testMode(
 
 	results := make([]bool, len(expectedSignals))
 	for i := 0; i < len(expectedSignals); i++ {
-		results[i] = <-ch
+		results[i] = <-ch == op.SignalCompleted
 	}
 	assert.Equal(t, expectedSignals, results)
 
@@ -298,74 +305,6 @@ func repeat(n int, evt []eventInfo) []eventInfo {
 
 func signals(s ...bool) []bool {
 	return s
-}
-
-func TestMakeEmptyClientFail(t *testing.T) {
-	config := outputs.MothershipConfig{}
-	clients, err := MakeClients(config, dummyMockClientFactory)
-	assert.Equal(t, ErrNoHostsConfigured, err)
-	assert.Equal(t, 0, len(clients))
-}
-
-func TestMakeSingleClient(t *testing.T) {
-	config := outputs.MothershipConfig{
-		Hosts: []string{"single"},
-	}
-
-	clients, err := MakeClients(config, dummyMockClientFactory)
-	assert.Nil(t, err)
-	assert.Equal(t, 1, len(clients))
-}
-
-func TestMakeSingleClientWorkers(t *testing.T) {
-	config := outputs.MothershipConfig{
-		Hosts:  []string{"single"},
-		Worker: 3,
-	}
-
-	clients, err := MakeClients(config, dummyMockClientFactory)
-	assert.Nil(t, err)
-	assert.Equal(t, 3, len(clients))
-}
-
-func TestMakeTwoClient(t *testing.T) {
-	config := outputs.MothershipConfig{
-		Hosts: []string{"client1", "client2"},
-	}
-
-	clients, err := MakeClients(config, dummyMockClientFactory)
-	assert.Nil(t, err)
-	assert.Equal(t, 2, len(clients))
-}
-
-func TestMakeTwoClientWorkers(t *testing.T) {
-	config := outputs.MothershipConfig{
-		Hosts:  []string{"client1", "client2"},
-		Worker: 3,
-	}
-
-	clients, err := MakeClients(config, dummyMockClientFactory)
-	assert.Nil(t, err)
-	assert.Equal(t, 6, len(clients))
-}
-
-func TestMakeTwoClientFail(t *testing.T) {
-	config := outputs.MothershipConfig{
-		Hosts:  []string{"client1", "client2"},
-		Worker: 3,
-	}
-
-	testError := errors.New("test")
-
-	i := 1
-	_, err := MakeClients(config, func(host string) (ProtocolClient, error) {
-		if i%3 == 0 {
-			return nil, testError
-		}
-		i++
-		return dummyMockClientFactory(host)
-	})
-	assert.Equal(t, testError, err)
 }
 
 func dummyMockClientFactory(host string) (ProtocolClient, error) {

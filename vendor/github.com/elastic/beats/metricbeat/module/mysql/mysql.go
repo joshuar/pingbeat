@@ -1,42 +1,37 @@
+/*
+Package mysql is Metricbeat module for MySQL server.
+*/
 package mysql
 
 import (
-	"github.com/elastic/beats/metricbeat/helper"
-
 	"database/sql"
-	_ "github.com/go-sql-driver/mysql"
 
-	"os"
+	// Register the MySQL driver.
+	_ "github.com/go-sql-driver/mysql"
 )
 
-func init() {
-	Module.Register()
-}
+// CreateDSN creates a DSN (data source name) string out of hostname, username,
+// and password.
+func CreateDSN(host string, username string, password string) string {
+	// Example: [username[:password]@][protocol[(address)]]/
+	dsn := host
 
-// Module object
-var Module = helper.NewModule("mysql", Mysql{})
+	if username != "" || password != "" {
+		dsn = "@" + dsn
+	}
 
-type Mysql struct {
-}
+	if password != "" {
+		dsn = ":" + password + dsn
+	}
 
-func (b Mysql) Setup() error {
-	// TODO: Ping available servers to check if available
-	return nil
-}
-
-// Connect expects a full mysql dsn
-// Example: [username[:password]@][protocol[(address)]]/
-func Connect(dsn string) (*sql.DB, error) {
-	return sql.Open("mysql", dsn)
-}
-
-///*** Testing helpers ***///
-
-func GetMySQLEnvDSN() string {
-	dsn := os.Getenv("MYSQL_DSN")
-
-	if len(dsn) == 0 {
-		dsn = "root@tcp(127.0.0.1:3306)/"
+	if username != "" {
+		dsn = username + dsn
 	}
 	return dsn
+}
+
+// Connect creates a new DB connection. It expects a full MySQL DSN.
+// Example DSN: [username[:password]@][protocol[(address)]]/
+func Connect(dsn string) (*sql.DB, error) {
+	return sql.Open("mysql", dsn)
 }

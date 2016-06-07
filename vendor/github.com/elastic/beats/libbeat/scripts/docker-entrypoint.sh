@@ -53,7 +53,7 @@ es_url() {
 # green or yellow.
 waitForElasticsearch() {
   echo -n "Waiting on elasticsearch($(es_url)) to start."
-  for ((i=1;i<=30;i++))
+  for ((i=1;i<=60;i++))
   do
     health=$(curl --silent "$(es_url)/_cat/health" | awk '{print $4}')
     if [[ "$health" == "green" ]] || [[ "$health" == "yellow" ]]
@@ -63,7 +63,6 @@ waitForElasticsearch() {
       return 0
     fi
 
-    ((i++))
     echo -n '.'
     sleep 1
   done
@@ -94,8 +93,28 @@ waitForLogstash() {
     echo >&2 "Address: ${LS_HOST}:${LS_TCP_PORT} and ${LS_HOST}:${LS_TLS_PORT}"
 }
 
+waitForKafka() {
+    echo -n "Waiting for kafka(${KAFKA_HOST}:${KAFKA_PORT}) to start."
+    for ((i=1; i<=90; i++)) do
+        if nc -vz ${KAFKA_HOST} ${KAFKA_PORT} 2>/dev/null; then
+            echo
+            echo "Kafka is ready!"
+            return 0
+        fi
+
+        ((i++))
+        echo -n '.'
+        sleep 1
+    done
+
+    echo
+    echo >&2 'Kafka is not available'
+    echo >&2 "Address: ${KAFKA_HOST}:${KAFKA_PORT}"
+}
+
 # Main
 readParams
 waitForElasticsearch
 waitForLogstash
+waitForKafka
 exec "$@"

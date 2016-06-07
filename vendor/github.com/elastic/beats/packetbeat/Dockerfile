@@ -1,5 +1,5 @@
 # Beats dockerfile used for testing
-FROM golang:1.5.3
+FROM golang:1.6.2
 MAINTAINER Nicolas Ruflin <ruflin@elastic.co>
 
 RUN set -x && \
@@ -12,7 +12,6 @@ RUN set -x \
   go get \
 	github.com/pierrre/gotestcover \
 	github.com/tsg/goautotest \
-	golang.org/x/tools/cmd/cover \
 	golang.org/x/tools/cmd/vet
 
 ENV GO15VENDOREXPERIMENT=1

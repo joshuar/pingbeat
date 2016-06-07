@@ -1,31 +1,27 @@
 /*
-
-This file is included in the main file to load all metricsets.
-
-In case only a subset of metricsets should be included, they can be specified manually in the main.go file.
-
+Package include imports all Module and MetricSet packages so that they register
+their factories with the global registry. This package can be imported in the
+main package to automatically register all of the standard supported Metricbeat
+modules.
 */
 package include
 
-// Make sure all active plugins are loaded
-// TODO: create a script to automatically generate this list
 import (
-	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/metricbeat/helper"
-
-	// List of all metrics to make sure they are registred
-	// Every new metric must be added here
+	// Every module and metricset must be added here so that they can register
+	// themselves.
+	_ "github.com/elastic/beats/metricbeat/module/apache"
 	_ "github.com/elastic/beats/metricbeat/module/apache/status"
-	_ "github.com/elastic/beats/metricbeat/module/golang"
+	_ "github.com/elastic/beats/metricbeat/module/mysql"
 	_ "github.com/elastic/beats/metricbeat/module/mysql/status"
+	_ "github.com/elastic/beats/metricbeat/module/redis"
 	_ "github.com/elastic/beats/metricbeat/module/redis/info"
+	_ "github.com/elastic/beats/metricbeat/module/system"
+	_ "github.com/elastic/beats/metricbeat/module/system/cores"
+	_ "github.com/elastic/beats/metricbeat/module/system/cpu"
+	_ "github.com/elastic/beats/metricbeat/module/system/filesystem"
+	_ "github.com/elastic/beats/metricbeat/module/system/fsstats"
+	_ "github.com/elastic/beats/metricbeat/module/system/memory"
+	_ "github.com/elastic/beats/metricbeat/module/system/process"
+	_ "github.com/elastic/beats/metricbeat/module/zookeeper"
+	_ "github.com/elastic/beats/metricbeat/module/zookeeper/mntr"
 )
-
-func ListAll() {
-	logp.Debug("beat", "Registered Modules and Metrics")
-	for moduleName, module := range helper.Registry {
-		for metricName, _ := range module.MetricSets {
-			logp.Debug("beat", "Registred: Module: %v, Metric: %v", moduleName, metricName)
-		}
-	}
-}

@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/outputs/mode"
@@ -33,13 +35,16 @@ type Client struct {
 	json jsonReader
 }
 
+type connectCallback func(client *Client) error
+
 type Connection struct {
 	URL      string
 	Username string
 	Password string
 
-	http      *http.Client
-	connected bool
+	http              *http.Client
+	connected         bool
+	onConnectCallback func() error
 }
 
 var (
@@ -59,6 +64,7 @@ func NewClient(
 	esURL, index string, proxyURL *url.URL, tls *tls.Config,
 	username, password string,
 	params map[string]string,
+	onConnectCallback connectCallback,
 ) *Client {
 	proxy := http.ProxyFromEnvironment
 	if proxyURL != nil {
@@ -79,6 +85,13 @@ func NewClient(
 		},
 		index:  index,
 		params: params,
+	}
+
+	client.Connection.onConnectCallback = func() error {
+		if onConnectCallback != nil {
+			return onConnectCallback(client)
+		}
+		return nil
 	}
 	return client
 }
@@ -105,6 +118,8 @@ func (client *Client) Clone() *Client {
 func (client *Client) PublishEvents(
 	events []common.MapStr,
 ) ([]common.MapStr, error) {
+
+	begin := time.Now()
 	publishEventsCallCount.Add(1)
 
 	if !client.connected {
@@ -126,11 +141,17 @@ func (client *Client) PublishEvents(
 	}
 
 	// send bulk request
+	bufferSize := request.buf.Len()
 	_, res, err := request.Flush()
 	if err != nil {
 		logp.Err("Failed to perform any bulk index operations: %s", err)
 		return events, err
 	}
+
+	logp.Debug("elasticsearch", "PublishEvents: %d metrics have been packed into a buffer of %s and published to elasticsearch in %v.",
+		len(events),
+		humanize.Bytes(uint64(bufferSize)),
+		time.Now().Sub(begin))
 
 	// check response for transient errors
 	client.json.init(res.raw)
@@ -186,10 +207,15 @@ func getIndex(event common.MapStr, index string) string {
 
 	// Check for dynamic index
 	if _, ok := event["beat"]; ok {
-		beatMeta := event["beat"].(common.MapStr)
-		// Check if index is set dynamically
-		if dynamicIndex, ok := beatMeta["index"]; ok {
-			index = dynamicIndex.(string)
+		beatMeta, ok := event["beat"].(common.MapStr)
+		if ok {
+			// Check if index is set dynamically
+			if dynamicIndex, ok := beatMeta["index"]; ok {
+				dynamicIndexValue, ok := dynamicIndex.(string)
+				if ok {
+					index = dynamicIndexValue
+				}
+			}
 		}
 	}
 
@@ -254,11 +280,11 @@ func bulkCollectPublishFails(
 
 		if status < 500 && status != 429 {
 			// hard failure, don't collect
-			logp.Warn("Can not index event (status=%v): %v", status, msg)
+			logp.Warn("Can not index event (status=%v): %s", status, msg)
 			continue
 		}
 
-		logp.Info("Bulk item insert failed (i=%v, status=%v): %v", i, status, msg)
+		logp.Info("Bulk item insert failed (i=%v, status=%v): %s", i, status, msg)
 		failed = append(failed, events[i])
 	}
 
@@ -414,6 +440,11 @@ func (conn *Connection) Connect(timeout time.Duration) error {
 	if !conn.connected {
 		return ErrNotConnected
 	}
+
+	err = conn.onConnectCallback()
+	if err != nil {
+		return fmt.Errorf("Connection marked as failed because the onConnect callback failed: %v", err)
+	}
 	return nil
 }
 
@@ -453,6 +484,7 @@ func (conn *Connection) request(
 		var err error
 		obj, err = json.Marshal(body)
 		if err != nil {
+			logp.Warn("Failed to json encode body (%v): %#v", err, body)
 			return 0, nil, ErrJSONEncodeFailed
 		}
 	}

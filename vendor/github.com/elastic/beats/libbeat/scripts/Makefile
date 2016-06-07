@@ -31,6 +31,7 @@ GOFILES = $(shell find . -type f -name '*.go')
 GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "*/vendor/*")
 SHELL=bash
 ES_HOST?="elasticsearch"
+PWD=$(shell pwd)
 BUILD_DIR?=$(shell pwd)/build
 COVERAGE_DIR=${BUILD_DIR}/coverage
 PROCESSES?= 4
@@ -38,9 +39,15 @@ TIMEOUT?= 90
 TEST_ENVIRONMENT?=false
 SYSTEM_TESTS?=false
 GOX_OS?=linux darwin windows solaris freebsd netbsd openbsd
-DOCKER_COMPOSE?=docker-compose -f docker-compose.yml
+TESTING_ENVIRONMENT?=snapshot
+DOCKER_COMPOSE?=docker-compose -f ${PWD}/../testing/environments/base.yml -f ${PWD}/../testing/environments/${TESTING_ENVIRONMENT}.yml -f docker-compose.yml
+DOCKER_CACHE?=1 # If set to 0, all docker images are created without cache
 GOPACKAGES_COMMA_SEP=$(subst $(space),$(comma),$(strip ${GOPACKAGES}))
 PYTHON_ENV?=${BUILD_DIR}/python-env
+
+ifeq ($(DOCKER_CACHE),0)
+	DOCKER_NOCACHE=--no-cache
+endif
 
 # Conditionally enable the race detector when RACE_DETECTOR=1.
 ifeq ($(RACE_DETECTOR),1)
@@ -107,8 +114,6 @@ ci:
 .PHONY: prepare-tests
 prepare-tests:
 	mkdir -p ${COVERAGE_DIR}
-	# coverage tools
-	go get golang.org/x/tools/cmd/cover
 	# gotestcover is needed to fetch coverage for multiple packages
 	go get github.com/pierrre/gotestcover
 
@@ -116,24 +121,25 @@ prepare-tests:
 # Race is not enabled for unit tests because tests run much slower.
 .PHONY: unit-tests
 unit-tests: prepare-tests
-	$(GOPATH)/bin/gotestcover -coverprofile=${COVERAGE_DIR}/unit.cov -short ${GOPACKAGES}
+	$(GOPATH)/bin/gotestcover $(RACE) -coverprofile=${COVERAGE_DIR}/unit.cov  ${GOPACKAGES}
+
 
 # Runs the unit tests without coverage reports.
 .PHONY: unit
 unit:
-	go test $(RACE) -short ./...
+	go test $(RACE) ${GOPACKAGES}
 
 # Run integration tests. Unit tests are run as part of the integration tests.
 .PHONY: integration-tests
 integration-tests: prepare-tests
-	$(GOPATH)/bin/gotestcover $(RACE) -coverprofile=${COVERAGE_DIR}/integration.cov ${GOPACKAGES}
+	$(GOPATH)/bin/gotestcover -tags=integration $(RACE) -coverprofile=${COVERAGE_DIR}/integration.cov  ${GOPACKAGES}
 
 # Runs the integration inside a virtual environment. This can be run on any docker-machine (local, remote)
 .PHONY: integration-tests-environment
 integration-tests-environment:
 	$(MAKE) prepare-tests
 	$(MAKE) build-image
-	${DOCKER_COMPOSE} run beat make integration-tests
+	${DOCKER_COMPOSE} run beat make integration-tests RACE_DETECTOR=$(RACE_DETECTOR)
 
 # Runs the system tests
 .PHONY: system-tests
@@ -144,23 +150,24 @@ system-tests: buildbeat.test prepare-tests python-env
 # Runs system tests without coverage reports and in parallel
 .PHONY: fast-system-tests
 fast-system-tests: buildbeat.test python-env
-	. ${PYTHON_ENV}/bin/activate; nosetests -w tests/system --processes=$(PROCESSES) --process-timeout=$(TIMEOUT)
-
-# Sets up the virtual python environment
-.PHONY: python-env
-python-env: ${ES_BEATS}/libbeat/tests/system/requirements.txt
-	test -d ${PYTHON_ENV} || virtualenv ${PYTHON_ENV}
-	if [ -a ./tests/system/requirements.txt ] && [ ! ${ES_BEATS}/libbeat/tests/system/requirements.txt -ef ./tests/system/requirements.txt ] ; then \
-		. ${PYTHON_ENV}/bin/activate && pip install -Ur ${ES_BEATS}/libbeat/tests/system/requirements.txt -Ur ./tests/system/requirements.txt ; \
-	else \
-		. ${PYTHON_ENV}/bin/activate && pip install -Ur ${ES_BEATS}/libbeat/tests/system/requirements.txt ; \
-	fi
+	. ${PYTHON_ENV}/bin/activate; nosetests -w tests/system --processes=$(PROCESSES) --process-timeout=$(TIMEOUT) -a '!integration'
 
 # Run benchmark tests
 .PHONY: benchmark-tests
 benchmark-tests:
 	# No benchmark tests exist so far
-	#go test -short -bench=. ./...
+	#go test -bench=. ${GOPACKAGES}
+
+# Sets up the virtual python environment
+.PHONY: python-env
+python-env: ${ES_BEATS}/libbeat/tests/system/requirements.txt
+	test -d ${PYTHON_ENV} || virtualenv ${PYTHON_ENV}
+	. ${PYTHON_ENV}/bin/activate && pip install --upgrade pip ; \
+	if [ -a ./tests/system/requirements.txt ] && [ ! ${ES_BEATS}/libbeat/tests/system/requirements.txt -ef ./tests/system/requirements.txt ] ; then \
+		. ${PYTHON_ENV}/bin/activate && pip install -Ur ${ES_BEATS}/libbeat/tests/system/requirements.txt -Ur ./tests/system/requirements.txt ; \
+	else \
+		. ${PYTHON_ENV}/bin/activate && pip install -Ur ${ES_BEATS}/libbeat/tests/system/requirements.txt ; \
+	fi
 
 # Runs unit and system tests without coverage reports
 .PHONY: test
@@ -172,6 +179,8 @@ test: unit
 # Runs all tests and generates the coverage reports
 .PHONY: testsuite
 testsuite:
+	$(MAKE) unit-tests
+
 	# Setups environment if TEST_ENVIRONMENT is set to true
 	if [ $(TEST_ENVIRONMENT) = true ]; then \
 		 $(MAKE) integration-tests-environment; \
@@ -202,17 +211,37 @@ coverage-report:
 
 # Update expects the most recent version of libbeat in the GOPATH
 .PHONY: update
-update:
-	bash ${ES_BEATS}/libbeat/scripts/update.sh ${BEATNAME} ${BEAT_DIR}/${BEATNAME} ${ES_BEATS}/libbeat
+update: python-env
+	# Update config
+	echo "Update config file"
+	rm -f etc/${BEATNAME}.yml
+	cat etc/beat.yml ${ES_BEATS}/libbeat/etc/libbeat.yml | sed -e "s/beatname/${BEATNAME}/g" > ${BEATNAME}.yml
 
+	# Update fields
+	echo "Update fields"
+	. ${PYTHON_ENV}/bin/activate && python ${ES_BEATS}/libbeat/scripts/generate_fields_docs.py $(PWD) ${BEATNAME}
 
+	# Update templates
+	. ${PYTHON_ENV}/bin/activate && python ${ES_BEATS}/libbeat/scripts/generate_template.py $(PWD) ${BEATNAME}
+	. ${PYTHON_ENV}/bin/activate && python ${ES_BEATS}/libbeat/scripts/generate_template.py --es2x $(PWD) ${BEATNAME}
+
+### KIBANA FILES HANDLING ###
+ES_URL?=http://localhost:9200/
+
+.PHONY: export-dashboards
+export-dashboards:
+	python ${ES_BEATS}/dev-tools//export_dashboards.py --url ${ES_URL} --dir $(shell pwd)/etc/kibana --beat ${BEATNAME}
+
+.PHONY: import-dashboards
+import-dashboards:
+	bash ${ES_BEATS}/dev-tools/import_dashboards.sh -url ${ES_URL} -dir $(shell pwd)/etc/kibana
 
 ### CONTAINER ENVIRONMENT ####
 
 # Builds the environment to test beat
 .PHONY: build-image
 build-image: write-environment
-	${DOCKER_COMPOSE} build
+	${DOCKER_COMPOSE} build ${DOCKER_NOCACHE}
 
 # Runs the environment so the redis and elasticsearch can also be used for local development
 # To use it for running the test, set ES_HOST and REDIS_HOST environment variable to the ip of your docker-machine.
@@ -233,3 +262,17 @@ write-environment:
 	echo "ES_PORT=9200" >> ${BUILD_DIR}/test.env
 	echo "ES_USER=beats" >> ${BUILD_DIR}/test.env
 	echo "ES_PASS=testing" >> ${BUILD_DIR}/test.env
+
+
+### Packaging targets ####
+
+# Installs the files that need to get to the home path on installations
+HOME_PREFIX?=/tmp/${BEATNAME}
+.PHONY: install-home
+install-home:
+	mkdir -p ${HOME_PREFIX}/kibana
+	if [ -d "etc/kibana" ]; then \
+		cp -a etc/kibana/. ${HOME_PREFIX}/kibana/; \
+		install -m 755  ../dev-tools/import_dashboards.sh ${HOME_PREFIX}/kibana/; \
+		install -m 755 ../dev-tools/import_dashboards.ps1 ${HOME_PREFIX}/kibana/; \
+	fi

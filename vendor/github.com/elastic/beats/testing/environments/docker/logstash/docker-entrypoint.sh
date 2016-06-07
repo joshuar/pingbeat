@@ -37,7 +37,7 @@ es_url() {
 # green or yellow.
 waitForElasticsearch() {
   echo -n "Waiting on elasticsearch(${ES_HOST}:${ES_PORT}) to start."
-  for ((i=1;i<=30;i++))
+  for ((i=1;i<=60;i++))
   do
     health=$(curl --silent "$(es_url)/_cat/health" | awk '{print $4}')
     if [[ "$health" == "green" ]] || [[ "$health" == "yellow" ]]
@@ -47,7 +47,6 @@ waitForElasticsearch() {
       return 0
     fi
 
-    ((i++))
     echo -n '.'
     sleep 1
   done
@@ -69,10 +68,10 @@ updateConfigFile_2() {
 
 # Main
 readParams
-if [ "$LS_VERSION" == "2" ]; then
-    updateConfigFile_2
-else
+if [ "$LS_VERSION" == "1.5" ]; then
     updateConfigFile_1_5
+else
+    updateConfigFile_2
 fi
 
 waitForElasticsearch

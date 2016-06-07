@@ -1,3 +1,4 @@
+[[packetbeat-overview]]
 == Overview
 
 Packetbeat is a real-time network packet analyzer that you can use 
@@ -28,7 +29,7 @@ Currently, Packetbeat supports the following protocols:
  * Memcache
 
 Packetbeat can insert the correlated transactions directly into Elasticsearch
-or into a central queue created with Redis (DEPRECATED) and Logstash. 
+or into a central queue created with Redis and Logstash. 
 
 Packetbeat can run on the same servers as your application processes or
 on its own servers. When running on dedicated servers, Packetbeat can get the
@@ -45,4 +46,3 @@ The same Elasticsearch and Kibana instances that are used for analysing the
 network traffic gathered by Packetbeat can be used for analysing the log files
 gathered by Logstash. This way, you can have network traffic and log analysis
 in the same system.
-

@@ -1,3 +1,5 @@
+// Need for unit and integration tests
+
 package logstash
 
 import (
@@ -11,11 +13,12 @@ import (
 
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/common/streambuf"
+	"github.com/elastic/beats/libbeat/outputs/transport/transptest"
 	"github.com/stretchr/testify/assert"
 )
 
 type protocolServer struct {
-	*mockServer
+	*transptest.MockServer
 }
 
 type mockConn struct {
@@ -43,16 +46,16 @@ func (d document) get(path string) interface{} {
 }
 
 func newProtoServerTCP(t *testing.T, to time.Duration) *protocolServer {
-	return &protocolServer{newMockServerTCP(t, to, "")}
+	return &protocolServer{transptest.NewMockServerTCP(t, to, "", nil)}
 }
 
 func (s *protocolServer) connectPair(compressLevel int) (*mockConn, *protocol, error) {
-	client, transp, err := s.mockServer.connectPair(1 * time.Second)
+	client, transp, err := s.MockServer.ConnectPair()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	proto, err := newClientProcol(transp, 100*time.Millisecond, compressLevel)
+	proto, err := newClientProcol(transp, 100*time.Millisecond, compressLevel, "test")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -237,7 +240,7 @@ func readMessage(buf *streambuf.Buffer) (*message, error) {
 
 func TestInvalidCompressionLevel(t *testing.T) {
 	conn := (net.Conn)(nil)
-	p, err := newClientProcol(conn, 5*time.Second, 10)
+	p, err := newClientProcol(conn, 5*time.Second, 10, "test")
 	assert.Nil(t, p)
 	assert.NotNil(t, err)
 }
@@ -270,6 +273,7 @@ func TestProtocolCloseAfterWindowSize(t *testing.T) {
 	// defer transp.conn.Close()
 
 	transp.sendEvents([]common.MapStr{common.MapStr{
+		"type":    "test",
 		"message": "hello world",
 	}})
 
@@ -303,7 +307,11 @@ func testProtocolReturnWindowSizes(
 
 	events := []common.MapStr{}
 	for i := 0; i < n; i++ {
-		events = append(events, common.MapStr{"message": string(i)})
+		events = append(events,
+			common.MapStr{
+				"type":    "test",
+				"message": string(i),
+			})
 	}
 
 	outEvents, err := transp.sendEvents(events)
@@ -325,7 +333,11 @@ func testProtocolReturnWindowSizes(
 
 	seq, err := transp.awaitACK(uint32(n))
 	assert.Equal(t, outEvents, events)
-	assert.Equal(t, docs, events)
+	assert.Equal(t, len(docs), len(events))
+	for i := range docs {
+		assert.Equal(t, docs[i]["type"], events[i]["type"])
+		assert.Equal(t, docs[i]["message"], events[i]["message"])
+	}
 	assert.Equal(t, n, int(seq))
 	assert.Equal(t, n, int(msg.size))
 	if expectErr {
@@ -364,7 +376,11 @@ func TestProtocolFailOnClosedConnection(t *testing.T) {
 
 	events := []common.MapStr{}
 	for i := 0; i < N; i++ {
-		events = append(events, common.MapStr{"message": i})
+		events = append(events,
+			common.MapStr{
+				"type":    "test",
+				"message": i,
+			})
 	}
 
 	transp.conn.Close()

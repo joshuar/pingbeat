@@ -1,3 +1,5 @@
+// +build !integration
+
 package logstash
 
 import (
@@ -8,6 +10,8 @@ import (
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/common/streambuf"
 	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/outputs/transport"
+	"github.com/elastic/beats/libbeat/outputs/transport/transptest"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -23,7 +27,7 @@ type testClientDriver interface {
 	Returns() []testClientReturn
 }
 
-type clientFactory func(TransportClient) testClientDriver
+type clientFactory func(*transport.Client) testClientDriver
 
 type testClientReturn struct {
 	n   int
@@ -35,8 +39,9 @@ type testDriverCommand struct {
 	events []common.MapStr
 }
 
-func newLumberjackTestClient(conn TransportClient) *client {
-	c, err := newLumberjackClient(conn, 3, testMaxWindowSize, 100*time.Millisecond)
+func newLumberjackTestClient(conn *transport.Client) *client {
+	c, err := newLumberjackClient(conn, 3,
+		testMaxWindowSize, 100*time.Millisecond, "test")
 	if err != nil {
 		panic(err)
 	}
@@ -54,10 +59,10 @@ const testMaxWindowSize = 64
 func testSendZero(t *testing.T, factory clientFactory) {
 	enableLogging([]string{"*"})
 
-	server := newMockServerTCP(t, 1*time.Second, "")
+	server := transptest.NewMockServerTCP(t, 1*time.Second, "", nil)
 	defer server.Close()
 
-	sock, transp, err := server.connectPair(1 * time.Second)
+	sock, transp, err := server.ConnectPair()
 	if err != nil {
 		t.Fatalf("Failed to connect server and client: %v", err)
 	}
@@ -80,9 +85,9 @@ func testSendZero(t *testing.T, factory clientFactory) {
 
 func testSimpleEvent(t *testing.T, factory clientFactory) {
 	enableLogging([]string{"*"})
-	server := newMockServerTCP(t, 1*time.Second, "")
+	server := transptest.NewMockServerTCP(t, 1*time.Second, "", nil)
 
-	sock, transp, err := server.connectPair(1 * time.Second)
+	sock, transp, err := server.ConnectPair()
 	if err != nil {
 		t.Fatalf("Failed to connect server and client: %v", err)
 	}
@@ -91,7 +96,7 @@ func testSimpleEvent(t *testing.T, factory clientFactory) {
 	defer transp.Close()
 	defer sock.Close()
 
-	event := common.MapStr{"name": "me", "line": 10}
+	event := common.MapStr{"type": "test", "name": "me", "line": 10}
 	client.Publish([]common.MapStr{event})
 
 	// receive window message
@@ -119,9 +124,9 @@ func testSimpleEvent(t *testing.T, factory clientFactory) {
 
 func testStructuredEvent(t *testing.T, factory clientFactory) {
 	enableLogging([]string{"*"})
-	server := newMockServerTCP(t, 1*time.Second, "")
+	server := transptest.NewMockServerTCP(t, 1*time.Second, "", nil)
 
-	sock, transp, err := server.connectPair(1 * time.Second)
+	sock, transp, err := server.ConnectPair()
 	if err != nil {
 		t.Fatalf("Failed to connect server and client: %v", err)
 	}
@@ -131,6 +136,7 @@ func testStructuredEvent(t *testing.T, factory clientFactory) {
 	defer sock.Close()
 
 	event := common.MapStr{
+		"type": "test",
 		"name": "test",
 		"struct": common.MapStr{
 			"field1": 1,
@@ -172,9 +178,9 @@ func testStructuredEvent(t *testing.T, factory clientFactory) {
 
 func testCloseAfterWindowSize(t *testing.T, factory clientFactory) {
 	enableLogging([]string{"*"})
-	server := newMockServerTCP(t, 100*time.Millisecond, "")
+	server := transptest.NewMockServerTCP(t, 100*time.Millisecond, "", nil)
 
-	sock, transp, err := server.connectPair(100 * time.Millisecond)
+	sock, transp, err := server.ConnectPair()
 	if err != nil {
 		t.Fatalf("Failed to connect server and client: %v", err)
 	}
@@ -185,6 +191,7 @@ func testCloseAfterWindowSize(t *testing.T, factory clientFactory) {
 	defer client.Stop()
 
 	client.Publish([]common.MapStr{common.MapStr{
+		"type":    "test",
 		"message": "hello world",
 	}})
 
@@ -198,8 +205,8 @@ func testCloseAfterWindowSize(t *testing.T, factory clientFactory) {
 func testMultiFailMaxTimeouts(t *testing.T, factory clientFactory) {
 	enableLogging([]string{"*"})
 
-	server := newMockServerTCP(t, 100*time.Millisecond, "")
-	transp, err := server.transp()
+	server := transptest.NewMockServerTCP(t, 100*time.Millisecond, "", nil)
+	transp, err := server.Transp()
 	if err != nil {
 		t.Fatalf("Failed to connect server and client: %v", err)
 	}
@@ -209,11 +216,11 @@ func testMultiFailMaxTimeouts(t *testing.T, factory clientFactory) {
 	defer transp.Close()
 	defer client.Stop()
 
-	event := common.MapStr{"name": "me", "line": 10}
+	event := common.MapStr{"type": "test", "name": "me", "line": 10}
 
 	for i := 0; i < N; i++ {
-		await := server.await()
-		err = transp.Connect(100 * time.Millisecond)
+		await := server.Await()
+		err = transp.Connect()
 		if err != nil {
 			t.Fatalf("Transport client Failed to connect: %v", err)
 		}

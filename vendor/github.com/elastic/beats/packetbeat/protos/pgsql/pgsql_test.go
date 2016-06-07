@@ -1,3 +1,5 @@
+// +build !integration
+
 package pgsql
 
 import (
@@ -17,7 +19,8 @@ import (
 func PgsqlModForTests() *Pgsql {
 	var pgsql Pgsql
 	results := &publish.ChanTransactions{make(chan common.MapStr, 10)}
-	pgsql.Init(true, results)
+	config := defaultConfig
+	pgsql.init(results, &config)
 	return &pgsql
 }
 

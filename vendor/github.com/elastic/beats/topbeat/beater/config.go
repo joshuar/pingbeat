@@ -4,13 +4,14 @@ type TopConfig struct {
 	Period *int64
 	Procs  *[]string
 	Stats  struct {
-		System     *bool `yaml:"system"`
-		Proc       *bool `yaml:"process"`
-		Filesystem *bool `yaml:"filesystem"`
-		CpuPerCore *bool `yaml:"cpu_per_core"`
+		System     *bool `config:"system"`
+		Proc       *bool `config:"process"`
+		Filesystem *bool `config:"filesystem"`
+		CpuPerCore *bool `config:"cpu_per_core"`
 	}
 }
 
 type ConfigSettings struct {
-	Input TopConfig
+	Input   *TopConfig `config:"input"`
+	Topbeat *TopConfig `config:"topbeat"`
 }
