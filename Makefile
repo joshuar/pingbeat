@@ -1,38 +1,33 @@
-BEATNAME=pingbeat
-BEAT_DIR=github.com/joshuar
-SYSTEM_TESTS=false
-TEST_ENVIRONMENT=false
-ES_BEATS=./vendor/github.com/elastic/beats
-GOPACKAGES=$(shell glide novendor)
-PREFIX?=.
+GLIDE_VERSION=0.11.0
 
-# Path to the libbeat Makefile
--include $(ES_BEATS)/libbeat/scripts/Makefile
+all: deps test
+	go build
 
-.PHONY: init
-init:
-	glide update  --no-recursive
-	make update
-	git init
+deps: glide
+	./glide install
 
-.PHONY: commit
-commit:
-	git add README.md CONTRIBUTING.md
-	git commit -m "Initial commit"
-	git add LICENSE
-	git commit -m "Add the LICENSE"
-	git add .gitignore .gitattributes
-	git commit -m "Add git settings"
-	git add .
-	git reset -- .travis.yml
-	git commit -m "Add Pingbeat"
-	git add .travis.yml
-	git commit -m "Add Travis CI"
+glide:
+ifeq ($(shell uname),Darwin)
+	curl -L https://github.com/Masterminds/glide/releases/download/v$(GLIDE_VERSION)/glide-v$(GLIDE_VERSION)-darwin-amd64.zip -o glide.zip
+	unzip glide.zip
+	mv ./darwin-amd64/glide ./glide
+	rm -fr ./darwin-amd64
+	rm ./glide.zip
+else
+	curl -L https://github.com/Masterminds/glide/releases/download/v$(GLIDE_VERSION)/glide-v$(GLIDE_VERSION)-linux-amd64.zip -o glide.zip
+	unzip glide.zip
+	mv ./linux-amd64/glide ./glide
+	rm -fr ./linux-amd64
+	rm ./glide.zip
+endif
 
-.PHONY: update-deps
-update-deps:
-	glide update --no-recursive --strip-vcs
+test:
+	go test
 
-# This is called by the beats packer before building starts
-.PHONY: before-build
-before-build:
+clean:
+	rm ./glide
+
+install: deps test
+	go install
+
+.PHONY: all test clean glide install
