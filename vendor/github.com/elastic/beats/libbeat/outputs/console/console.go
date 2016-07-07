@@ -5,30 +5,30 @@ import (
 	"os"
 
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/common/op"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/outputs"
 )
 
 func init() {
-	outputs.RegisterOutputPlugin("console", New)
+	outputs.RegisterOutputPlugin("console", plugin{})
+}
+
+type plugin struct{}
+
+func (p plugin) NewOutput(
+	config *outputs.MothershipConfig,
+	topologyExpire int,
+) (outputs.Outputer, error) {
+	pretty := config.Pretty != nil && *config.Pretty
+	return newConsole(pretty), nil
 }
 
 type console struct {
-	config config
-}
-
-func New(config *common.Config, _ int) (outputs.Outputer, error) {
-	c := &console{config: defaultConfig}
-	err := config.Unpack(&c.config)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	pretty bool
 }
 
 func newConsole(pretty bool) *console {
-	return &console{config{pretty}}
+	return &console{pretty}
 }
 
 func writeBuffer(buf []byte) error {
@@ -44,27 +44,22 @@ func writeBuffer(buf []byte) error {
 	return nil
 }
 
-// Implement Outputer
-func (c *console) Close() error {
-	return nil
-}
-
 func (c *console) PublishEvent(
-	s op.Signaler,
+	s outputs.Signaler,
 	opts outputs.Options,
 	event common.MapStr,
 ) error {
 	var jsonEvent []byte
 	var err error
 
-	if c.config.Pretty {
+	if c.pretty {
 		jsonEvent, err = json.MarshalIndent(event, "", "  ")
 	} else {
 		jsonEvent, err = json.Marshal(event)
 	}
 	if err != nil {
-		logp.Err("Fail to convert the event to JSON (%v): %#v", err, event)
-		op.SigCompleted(s)
+		logp.Err("Fail to convert the event to JSON: %s", err)
+		outputs.SignalCompleted(s)
 		return err
 	}
 
@@ -75,12 +70,12 @@ func (c *console) PublishEvent(
 		goto fail
 	}
 
-	op.SigCompleted(s)
+	outputs.SignalCompleted(s)
 	return nil
 fail:
 	if opts.Guaranteed {
 		logp.Critical("Unable to publish events to console: %v", err)
 	}
-	op.SigFailed(s, err)
+	outputs.SignalFailed(s, err)
 	return err
 }

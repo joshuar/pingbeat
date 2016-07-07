@@ -1,7 +1,7 @@
-from packetbeat import BaseTest
+from pbtests.packetbeat import TestCase
 
 
-class Test(BaseTest):
+class Test(TestCase):
 
     def test_mysql_error(self):
         self.render_config_template(
@@ -19,3 +19,4 @@ class Test(BaseTest):
         assert objs[0]["status"] == "Error"
         assert objs[0]["mysql.error_code"] == 1046
         assert objs[0]["mysql.error_message"] == "3D000: No database selected"
+        assert objs[0]["count"] == 1

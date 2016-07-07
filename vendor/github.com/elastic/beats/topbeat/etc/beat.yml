@@ -1,7 +1,7 @@
 ################### Topbeat Configuration Example #########################
 
-############################# Topbeat ############################################
-topbeat:
+############################# Input ############################################
+input:
   # In seconds, defines how often to read server statistics
   period: 10
 

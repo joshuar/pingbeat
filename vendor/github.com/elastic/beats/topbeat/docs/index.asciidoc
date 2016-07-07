@@ -1,10 +1,8 @@
 = Topbeat Reference
-:libbeat: http://www.elastic.co/guide/en/beats/libbeat/master
-:elasticsearch: https://www.elastic.co/guide/en/elasticsearch/reference/master/
-:version: 5.0.0-alpha2
+:libbeat: http://www.elastic.co/guide/en/beats/libbeat/1.2
+:version: 1.2.3
 :beatname_lc: topbeat
 :beatname_uc: Topbeat
-:security: X-Pack Security
 
 include::./overview.asciidoc[]
 
@@ -12,13 +10,7 @@ include::./gettingstarted.asciidoc[]
 
 include::./command-line.asciidoc[]
 
-include::../../libbeat/docs/shared-directory-layout.asciidoc[]
-
 include::./configuring-howto.asciidoc[]
-
-include::./topbeat-filtering.asciidoc[]
-
-include::../../libbeat/docs/shared-config-ingest.asciidoc[]
 
 include::./configuring-logstash.asciidoc[]
 

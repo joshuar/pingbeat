@@ -19,9 +19,6 @@ Contains common fields available in all event types.
 
 
 
-=== beat Fields
-
-
 ==== beat.name
 
 The name of the Beat sending the log messages. If the shipper name is set in the configuration file, then that value is used. If it is not set, the hostname is used.
@@ -68,7 +65,7 @@ Contains log file lines.
 
 ==== source
 
-type: keyword
+type: string
 
 required: True
 
@@ -86,7 +83,7 @@ The file offset the reported line starts at.
 
 ==== message
 
-type: text
+type: string
 
 required: True
 
@@ -96,6 +93,8 @@ The content of the line read from the log file.
 ==== fields
 
 type: dict
+
+required: False
 
 Contains user configurable fields.
 

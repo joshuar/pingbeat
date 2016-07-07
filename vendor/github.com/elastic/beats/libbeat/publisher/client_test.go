@@ -1,11 +1,10 @@
-// +build !integration
-
 package publisher
 
 import (
 	"reflect"
 	"testing"
 
+	"github.com/elastic/beats/libbeat/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,19 +12,19 @@ import (
 // ClientOptions.
 func TestGetClient(t *testing.T) {
 	c := &client{
-		publisher: &Publisher{},
+		publisher: &PublisherType{
+			asyncPublisher: &asyncPublisher{},
+			syncPublisher:  &syncPublisher{},
+		},
 	}
-	c.publisher.pipelines.async = &asyncPipeline{}
-	c.publisher.pipelines.sync = &syncPipeline{}
-
-	asyncClient := c.publisher.pipelines.async
-	syncClient := c.publisher.pipelines.sync
+	asyncClient := c.publisher.asyncPublisher.client()
+	syncClient := c.publisher.syncPublisher.client()
 	guaranteedClient := asyncClient
 	guaranteedSyncClient := syncClient
 
 	var testCases = []struct {
 		in  []ClientOption
-		out pipeline
+		out eventPublisher
 	}{
 		// Add new client options here:
 		{[]ClientOption{}, asyncClient},
@@ -36,8 +35,31 @@ func TestGetClient(t *testing.T) {
 
 	for _, test := range testCases {
 		expected := reflect.ValueOf(test.out)
-		_, client := c.getPipeline(test.in)
+		_, client := c.getClient(test.in)
 		actual := reflect.ValueOf(client)
 		assert.Equal(t, expected.Pointer(), actual.Pointer())
 	}
+}
+
+// Test that ChanClient writes an event to its Channel.
+func TestChanClientPublishEvent(t *testing.T) {
+	cc := &ChanClient{
+		Channel: make(chan common.MapStr, 1),
+	}
+
+	e1 := testEvent()
+	cc.PublishEvent(e1)
+	assert.Equal(t, e1, <-cc.Channel)
+}
+
+// Test that ChanClient write events to its Channel.
+func TestChanClientPublishEvents(t *testing.T) {
+	cc := &ChanClient{
+		Channel: make(chan common.MapStr, 2),
+	}
+
+	e1, e2 := testEvent(), testEvent()
+	cc.PublishEvents([]common.MapStr{e1, e2})
+	assert.Equal(t, e1, <-cc.Channel)
+	assert.Equal(t, e2, <-cc.Channel)
 }

@@ -13,11 +13,9 @@ configuration settings, you need to restart Filebeat to pick up the changes.
 * <<elasticsearch-output>>
 * <<logstash-output>>
 * <<redis-output>>
-* <<kafka-output>>
 * <<file-output>>
 * <<console-output>>
 * <<configuration-shipper>>
-* <<configuration-path>>
 * <<configuration-logging>>
 * <<configuration-run-options>>
 

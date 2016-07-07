@@ -1,61 +1,39 @@
-import sys
-import unittest
-from winlogbeat import BaseTest
+from winlogbeat import TestCase
+
 
 """
 Contains tests for config parsing.
 """
 
 
-@unittest.skipUnless(sys.platform.startswith("win"), "requires Windows")
-class Test(BaseTest):
+class Test(TestCase):
     def test_valid_config(self):
         """
-        configtest - valid config
+        With -configtest and an error in the configuration, it should
+        return a non-zero error code.
         """
         self.render_config_template(
             ignore_older="1h",
             event_logs=[
-                {"name": "Application", "ignore_older": "48h"}
+              {"name": "Application", "ignore_older": "48h"}
             ]
         )
-        self.start_beat(extra_args=["-configtest"]).check_wait()
+        proc = self.start_winlogbeat(extra_args=["-configtest"])
+        exit_code = proc.wait()
+        assert exit_code == 0
 
     def test_invalid_ignore_older(self):
         """
-        configtest - invalid ignore_older units (1 hour)
+        With -configtest and an error in the configuration, it should
+        return a non-zero error code.
         """
         self.render_config_template(
+            ignore_older="1 hour",
             event_logs=[
-                {"name": "Application", "ignore_older": "1 hour"}
+              {"name": "Application"}
             ]
         )
-        self.start_beat(extra_args=["-configtest"]).check_wait(exit_code=1)
-        assert self.log_contains(
-            "unknown unit  hour in duration 1 hour accessing 'ignore_older'")
-
-    def test_invalid_level(self):
-        """
-        configtest - invalid level (errors)
-        """
-        self.render_config_template(
-            event_logs=[
-                {"name": "Application", "level": "errors"}
-            ]
-        )
-        self.start_beat(extra_args=["-configtest"]).check_wait(exit_code=1)
-        assert self.log_contains(
-            "invalid level ('errors') for query")
-
-    def test_invalid_api(self):
-        """
-        configtest - invalid api (file)
-        """
-        self.render_config_template(
-            event_logs=[
-                {"name": "Application", "api": "file"}
-            ]
-        )
-        self.start_beat(extra_args=["-configtest"]).check_wait(exit_code=1)
-        assert self.log_contains(("Failed to create new event log. file API is "
-                                  "not available"))
+        proc = self.start_winlogbeat(extra_args=["-configtest"])
+        exit_code = proc.wait()
+        assert exit_code == 1
+        assert self.log_contains("Invalid top level ignore_older value '1 hour'")

@@ -52,7 +52,7 @@ Once you've created a configuration file you can run
 pingbeat with:
 
 ```
-pingbeat -c /path/to/pingbeat.yml
+pingbeat -c /path/to/beat.yml
 
 ```
 

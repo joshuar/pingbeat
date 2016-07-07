@@ -1,7 +1,3 @@
-Please post all questions and issues first on
-[https://discuss.elastic.co/c/beats](https://discuss.elastic.co/c/beats)
-before opening a Github Issue.
-
 # Contributing to Beats
 
 The Beats are open source and we love to receive contributions from our
@@ -50,10 +46,6 @@ Beats](https://github.com/elastic/beats/blob/master/libbeat/docs/communitybeats.
 ## Setting up your dev environment
 
 The Beats are Go programs, so install the latest version of
-[golang](http://golang.org/) if you don't have it already. The current Go version
-used for development is Golang 1.6.2.
-
-The Beats are Go programs, so install the latest version of
 [golang](http://golang.org/) if you don't have it already.
 
 The location where you clone is important. Please clone under the source
@@ -73,17 +65,9 @@ Packetbeat:
 Some of the Beats might have extra development requirements, in which case a
 CONTRIBUTING.md file is find in the Beat directory.
 
-## Testing
-
 You can run the whole testsuite with the following command:
 
-    $ make testsuite
-
-Running the testsuite has the following requirements:
-
-* Python >=2.7.9
-* Docker >=1.10.0
-* Docker-compose >= 1.7.0
+    # make testsuite
 
 ## Dependencies
 

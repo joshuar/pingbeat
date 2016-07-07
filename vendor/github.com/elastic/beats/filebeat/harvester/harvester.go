@@ -14,7 +14,8 @@
 package harvester
 
 import (
-	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"sync"
 
@@ -25,10 +26,11 @@ import (
 
 type Harvester struct {
 	Path               string /* the file path to harvest */
+	ProspectorConfig   config.ProspectorConfig
 	Config             *config.HarvesterConfig
 	offset             int64
-	State              input.FileState
-	stateMutex         sync.Mutex
+	offsetLock         sync.Mutex
+	Stat               *FileStat
 	SpoolerChan        chan *input.FileEvent
 	encoding           encoding.EncodingFactory
 	file               FileSource /* the file being watched */
@@ -36,46 +38,71 @@ type Harvester struct {
 	IncludeLinesRegexp []*regexp.Regexp
 }
 
-func NewHarvester(
-	cfg *config.HarvesterConfig,
-	path string,
-	state input.FileState,
-	spooler chan *input.FileEvent,
-	offset int64,
-
-) (*Harvester, error) {
-	encoding, ok := encoding.FindEncoding(cfg.Encoding)
-	if !ok || encoding == nil {
-		return nil, fmt.Errorf("unknown encoding('%v')", cfg.Encoding)
-	}
-
-	h := &Harvester{
-		Path:        path,
-		Config:      cfg,
-		State:       state,
-		SpoolerChan: spooler,
-		encoding:    encoding,
-		offset:      offset,
-	}
-	h.ExcludeLinesRegexp = cfg.ExcludeLines
-	h.IncludeLinesRegexp = cfg.IncludeLines
-	return h, nil
+// Contains statistic about file when it was last seend by the prospector
+type FileStat struct {
+	Fileinfo      os.FileInfo /* the file info */
+	Return        chan int64  /* the harvester will send an event with its offset when it closes */
+	LastIteration uint32      /* int number of the last iterations in which we saw this file */
 }
+
+type LogSource interface {
+	io.ReadCloser
+	Name() string
+}
+
+type FileSource interface {
+	LogSource
+	Stat() (os.FileInfo, error)
+	Continuable() bool // can we continue processing after EOF?
+}
+
+// Interface for the different harvester types
+type Typer interface {
+	open()
+	read()
+}
+
+// restrict file to minimal interface of FileSource to prevent possible casts
+// to additional interfaces supported by underlying file
+type pipeSource struct{ file *os.File }
+
+func (p pipeSource) Read(b []byte) (int, error) { return p.file.Read(b) }
+func (p pipeSource) Close() error               { return p.file.Close() }
+func (p pipeSource) Name() string               { return p.file.Name() }
+func (p pipeSource) Stat() (os.FileInfo, error) { return p.file.Stat() }
+func (p pipeSource) Continuable() bool          { return false }
+
+type fileSource struct{ *os.File }
+
+func (fileSource) Continuable() bool { return true }
 
 func (h *Harvester) Start() {
 	// Starts harvester and picks the right type. In case type is not set, set it to defeault (log)
+
 	go h.Harvest()
 }
 
-// open does open the file given under h.Path and assigns the file handler to h.file
-func (h *Harvester) open() (encoding.Encoding, error) {
+func NewFileStat(fi os.FileInfo, lastIteration uint32) *FileStat {
+	fs := &FileStat{
+		Fileinfo:      fi,
+		Return:        make(chan int64, 1),
+		LastIteration: lastIteration,
+	}
+	return fs
+}
 
-	switch h.Config.InputType {
-	case config.StdinInputType:
-		return h.openStdin()
-	case config.LogInputType:
-		return h.openFile()
-	default:
-		return nil, fmt.Errorf("Invalid input type")
+func (fs *FileStat) Finished() bool {
+	return len(fs.Return) != 0
+}
+
+// Ignore forgets about the previous harvester results and let it continue on the old
+// file - start a new channel to use with the new harvester.
+func (fs *FileStat) Ignore() {
+	fs.Return = make(chan int64, 1)
+}
+
+func (fs *FileStat) Continue(old *FileStat) {
+	if old != nil {
+		fs.Return = old.Return
 	}
 }

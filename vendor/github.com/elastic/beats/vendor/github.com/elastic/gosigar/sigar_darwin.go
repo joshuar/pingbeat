@@ -165,14 +165,14 @@ func (self *CpuList) Get() error {
 }
 
 func (self *FileSystemList) Get() error {
-	num, err := syscall.Getfsstat(nil, C.MNT_NOWAIT)
-	if err != nil {
+	num, err := getfsstat(nil, C.MNT_NOWAIT)
+	if num < 0 {
 		return err
 	}
 
 	buf := make([]syscall.Statfs_t, num)
 
-	_, err = syscall.Getfsstat(buf, C.MNT_NOWAIT)
+	num, err = getfsstat(buf, C.MNT_NOWAIT)
 	if err != nil {
 		return err
 	}
@@ -251,8 +251,6 @@ func (self *ProcState) Get(pid int) error {
 	}
 
 	self.Ppid = int(info.pbsd.pbi_ppid)
-
-	self.Pgid = int(info.pbsd.pbi_pgid)
 
 	self.Tty = int(info.pbsd.e_tdev)
 
@@ -441,6 +439,30 @@ func sysctlbyname(name string, data interface{}) (err error) {
 
 	bbuf := bytes.NewBuffer([]byte(val))
 	return binary.Read(bbuf, binary.LittleEndian, data)
+}
+
+// syscall.Getfsstat() wrapper is broken, roll our own to workaround.
+func getfsstat(buf []syscall.Statfs_t, flags int) (n int, err error) {
+	var ptr uintptr
+	var size uintptr
+
+	if len(buf) > 0 {
+		ptr = uintptr(unsafe.Pointer(&buf[0]))
+		size = unsafe.Sizeof(buf[0]) * uintptr(len(buf))
+	} else {
+		ptr = uintptr(0)
+		size = uintptr(0)
+	}
+
+	trap := uintptr(syscall.SYS_GETFSSTAT64)
+	ret, _, errno := syscall.Syscall(trap, ptr, size, uintptr(flags))
+
+	n = int(ret)
+	if errno != 0 {
+		err = errno
+	}
+
+	return
 }
 
 func task_info(pid int, info *C.struct_proc_taskallinfo) error {

@@ -9,15 +9,13 @@ The Topbeat configuration file uses http://yaml.org/[YAML] for its syntax.
 The configuration options are described in the following sections. After changing
 configuration settings, you need to restart Topbeat to pick up the changes.
 
-* <<configuration-topbeat>>
+* <<configuration-input>>
 * <<elasticsearch-output>>
 * <<logstash-output>>
 * <<redis-output>>
-* <<kafka-output>>
 * <<file-output>>
 * <<console-output>>
 * <<configuration-shipper>>
-* <<configuration-path>>
 * <<configuration-logging>>
 * <<configuration-run-options>>
 

@@ -14,7 +14,7 @@ filebeat:
   # List of prospectors to fetch data.
   prospectors:
     # Each - is a prospector. Below are the prospector specific configurations
-    - input_type: log
+    -
       # Paths that should be crawled and fetched. Glob based paths.
       # For each file found under this path, a harvester is started.
       paths:
@@ -23,8 +23,7 @@ filebeat:
       # the type defines the document type these entries should be stored
       # in. Default: log
       document_type: apache
-
-    - input_type: log
+    -
       paths:
         - /var/log/messages
         - "/var/log/*.log"
@@ -32,6 +31,11 @@ filebeat:
 -------------------------------------------------------------------------------------
 
 ==== Options
+
+===== paths
+
+A list of glob-based paths that should be crawled and fetched. Filebeat starts a harvester for
+each file that it finds under the specified paths. You can specify one path per line. Each line begins with a dash (-).
 
 ===== input_type
 
@@ -41,11 +45,6 @@ One of the following input types:
     * stdin: Reads the standard in
 
 The value that you specify here is used as the `input_type` for each event published to Logstash and Elasticsearch.
-
-===== paths
-
-A list of glob-based paths that should be crawled and fetched. Filebeat starts a harvester for
-each file that it finds under the specified paths. You can specify one path per line. Each line begins with a dash (-).
 
 [[exclude-lines]]
 ===== exclude_lines
@@ -58,14 +57,8 @@ The following example configures Filebeat to drop any lines that start with "DBG
 
 [source,yaml]
 -------------------------------------------------------------------------------------
-filebeat:
-  prospectors:
-    - paths:
-        - /var/log/myapp/*.log
-      exclude_lines: ["^DBG"]
+exclude_lines: ["^DBG"]
 -------------------------------------------------------------------------------------
-
-See <<regexp-support>> for a list of supported regexp patterns.
 
 [[include-lines]]
 ===== include_lines
@@ -78,11 +71,7 @@ The following example configures Filebeat to export any lines that start with "E
 
 [source,yaml]
 -------------------------------------------------------------------------------------
-filebeat:
-  prospectors:
-    - paths:
-        - /var/log/myapp/*.log
-      include_lines: ["^ERR", "^WARN"]
+include_lines: ["^ERR", "^WARN"]
 -------------------------------------------------------------------------------------
 
 NOTE: If both `include_lines` and `exclude_lines` are defined, Filebeat executes `include_lines` first and then executes `exclude_lines`. So, for example, to export all Apache log lines except the debugging messages (DBGs), you can use:
@@ -93,9 +82,6 @@ NOTE: If both `include_lines` and `exclude_lines` are defined, Filebeat executes
  exclude_lines: ["^DBG"]
 -------------------------------------------------------------------------------------
 
-See <<regexp-support>> for a list of supported regexp patterns.
-
-[[exclude-files]]
 ===== exclude_files
 
 A list of regular expressions to match the files that you want Filebeat to ignore. By default no files are excluded.
@@ -107,53 +93,27 @@ The following example configures Filebeat to ignore all the files that have a `g
   exclude_files: [".gz$"]
 -------------------------------------------------------------------------------------
 
-See <<regexp-support>> for a list of supported regexp patterns.
-
-===== tags
-
-A list of tags that the Beat includes in the `tags` field of each published
-event. Tags make it easy to select specific events in Kibana or apply
-conditional filtering in Logstash. These tags will be appended to the list of
-tags specified in the `shipper` configuration.
-
-Example:
-
-[source,yaml]
---------------------------------------------------------------------------------
-filebeat:
-  prospectors:
-    - paths: ["/var/log/app/*.json"]
-      tags: ["json"]
---------------------------------------------------------------------------------
-
 [[configuration-fields]]
 ===== fields
 
-Optional fields that you can specify to add additional information to the
-output. For example, you might add fields that you can use for filtering log
-data. Fields can be scalar values, arrays, dictionaries, or any nested
-combination of these. By default, the fields that you specify here will be
-grouped under a `fields` sub-dictionary in the output document. To store the
-custom fields as top-level fields, set the `fields_under_root` option to true.
-If a duplicate field is declared in the `shipper` configuration, then its value
-will be overwritten by the value declared here.
+Optional fields that you can specify to add additional information to the output. For
+example, you might add fields that you can use for filtering log data. Fields can be
+scalar values, arrays, dictionaries, or any nested combination of these. All scalar values will be interpreted as strings. By default,
+the fields that you specify here will be grouped under a `fields` sub-dictionary in the output document. To store the custom fields as top-level fields, set the `fields_under_root` option to true.
 
 [source,yaml]
---------------------------------------------------------------------------------
-filebeat:
-  prospectors:
-    - paths: ["/var/log/app/*.log"]
-      fields:
-        app_id: query_engine_12
---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
+fields:
+    level: debug
+    review: 1
 
+-------------------------------------------------------------------------------------
 [[fields-under-root]]
 ===== fields_under_root
 
-If this option is set to true, the custom <<configuration-fields>> are stored as
-top-level fields in the output document instead of being grouped under a
-`fields` sub-dictionary. If the custom field names conflict with other field
-names added by Filebeat, then the custom fields overwrite the other fields.
+If this option is set to true, the custom <<configuration-fields>> are stored as top-level fields
+in the output document instead of being grouped under a `fields` sub-dictionary.
+If the custom field names conflict with other field names added by Filebeat, the custom fields overwrite the other fields.
 
 [[ignore-older]]
 ===== ignore_older
@@ -206,40 +166,6 @@ The size in bytes of the buffer that each harvester uses when fetching a file. T
 The maximum number of bytes that a single log message can have. All bytes after `max_bytes` are discarded and not sent.
 This setting is especially useful for multiline log messages, which can get large. The default is 10MB (10485760).
 
-[[config-json]]
-===== json
-These options make it possible for Filebeat to decode logs structured as JSON messages. Filebeat
-processes the logs line by line, so the JSON decoding only works if there is one JSON object per
-line.
-
-The decoding happens before line filtering and multiline. You can combine JSON decoding with filtering
-and multiline if you set the `message_key` option. This can be helpful in situations where the application
-logs are wrapped in JSON objects, like it happens for example with Docker.
-
-Example configuration:
-
-[source,yaml]
--------------------------------------------------------------------------------------
-json:
-  message_key: log
-  keys_under_root: true
-  add_error_key: true
--------------------------------------------------------------------------------------
-
-
-*`message_key`*:: JSON key on which to apply the line filtering and multiline settings. This key must be top level
-and its value must be string, otherwise it is ignored. If no text key is defined, the line
-filtering and multiline features cannot be used.
-
-*`keys_under_root`*:: By default, the decoded JSON is placed under a "json" key in the output document.
-If you enable this setting, the keys are copied top level in the output document. The default is false.
-
-*`overwrite_keys`*:: If `keys_under_root` and this setting are enabled, then the values from the decoded
-JSON object overwrite the fields that Filebeat normally adds (type, source, offset, etc.) in case of conflicts.
-
-*`add_error_key`*:: If this setting is enabled, Filebeat adds a "json_error" key in case of JSON
-unmarshaling errors or when a text key is defined in the configuration but cannot be used.
-
 [[multiline]]
 ===== multiline
 
@@ -250,7 +176,7 @@ The following example shows how to configure Filebeat to handle a multiline mess
 [source,yaml]
 -------------------------------------------------------------------------------------
 multiline:
-    pattern: '^\['
+    pattern: ^\[
     negate: true
     match: after
 
@@ -267,11 +193,9 @@ Filebeat takes all the lines that do not start with `[` and combines them with t
     at org.elasticsearch.action.admin.indices.delete.TransportDeleteIndexAction.checkBlock(TransportDeleteIndexAction.java:75)
 -------------------------------------------------------------------------------------
 
-See <<multiline-examples>> for more configuration examples.
-
 You specify the following settings under `multiline` to control how Filebeat combines the lines in the message:
 
-*`pattern`*:: Specifies the regular expression pattern to match. See <<regexp-support>> for a list of supported regexp patterns.
+*`pattern`*:: Specifies the regular expression pattern to match.
 
 *`negate`*:: Defines whether the pattern is negated. The default is `false`.
 
@@ -293,6 +217,34 @@ the multiline message contains more than `max_lines`, any additional
 lines are discarded. The default is 500.
 
 *`timeout`*:: After the specified timeout, Filebeat sends the multiline event even if no new pattern is found to start a new event. The default is 5s.
+
+Here's an example configuration that shows the regular expression for a slightly more complex example:
+
+["source","sh",subs="attributes,callouts"]
+-------------------------------------------------------------------------------------
+multiline:
+    pattern: "^[[:space:]]+(at|...)|^Caused by:"
+    negate: false
+    match: after
+-------------------------------------------------------------------------------------
+
+In this example, the pattern matches the following lines:
+
+* a line that begins with spaces followed by the word `at` or `...`
+* a line that begins with the words `Caused by:`
+
+You could use this configuration to join the following lines from a Java stack trace into a single event:
+
+["source","sh",subs="attributes,callouts"]
+-------------------------------------------------------------------------------------
+Exception in thread "main" java.lang.IllegalStateException: A book has a null property
+       at com.example.myproject.Author.getBookIds(Author.java:38)
+       at com.example.myproject.Bootstrap.main(Bootstrap.java:14)
+Caused by: java.lang.NullPointerException
+       at com.example.myproject.Book.getId(Book.java:22)
+       at com.example.myproject.Author.getBookIds(Author.java:35)
+       ... 1 more
+-------------------------------------------------------------------------------------
 
 ===== tail_files
 
@@ -370,13 +322,13 @@ filebeat:
 
 ===== registry_file
 
-The name of the registry file. If a relative path is used, it is considered relative to the
-data path. See the <<directory-layout>> section for details. The default is `registry`.
+The name of the registry file. By default, the registry file is put in the current
+working directory. If the working directory changes for subsequent runs of Filebeat, indexing starts from the beginning again.
 
 [source,yaml]
 -------------------------------------------------------------------------------------
 filebeat:
-  registry_file: registry
+  registry_file: .filebeat
 -------------------------------------------------------------------------------------
 
 
@@ -387,10 +339,7 @@ Each configuration file must end with `.yml`. Each config file must also specify
 config hierarchy even though only the prospector part of the file is processed. All global
 options, such as `spool_size`, are ignored.
 
-The `config_dir` option MUST point to a directory other than the directory where the main Filebeat config file resides.
-
-If the specified path is not absolute, it is considered relative to the configuration path. See the
-<<directory-layout>> section for details.
+The `config_dir` option MUST point to a directory other than the directory where the  main Filebeat config file resides.
 
 [source,yaml]
 -------------------------------------------------------------------------------------
@@ -414,11 +363,7 @@ include::../../../../libbeat/docs/outputconfig.asciidoc[]
 
 include::../../../../libbeat/docs/shipperconfig.asciidoc[]
 
-include::../../../../libbeat/docs/shared-path-config.asciidoc[]
-
 include::../../../../libbeat/docs/loggingconfig.asciidoc[]
 
 include::../../../../libbeat/docs/runconfig.asciidoc[]
-
-include::../../../../libbeat/docs/filteringconfig.asciidoc[]
 

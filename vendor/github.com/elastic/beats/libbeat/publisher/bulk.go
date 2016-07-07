@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/common/op"
+	"github.com/elastic/beats/libbeat/outputs"
 )
 
 type bulkWorker struct {
@@ -17,8 +17,8 @@ type bulkWorker struct {
 	flushTicker *time.Ticker
 
 	maxBatchSize int
-	events       []common.MapStr // batched events
-	pending      []op.Signaler   // pending signalers for batched events
+	events       []common.MapStr    // batched events
+	pending      []outputs.Signaler // pending signalers for batched events
 }
 
 func newBulkWorker(
@@ -38,13 +38,17 @@ func newBulkWorker(
 		pending:      nil,
 	}
 
-	b.ws.wg.Add(1)
+	ws.wg.Add(1)
 	go b.run()
 	return b
 }
 
 func (b *bulkWorker) send(m message) {
-	send(b.queue, b.bulkQueue, m)
+	if m.events == nil {
+		b.queue <- m
+	} else {
+		b.bulkQueue <- m
+	}
 }
 
 func (b *bulkWorker) run() {
@@ -59,14 +63,10 @@ func (b *bulkWorker) run() {
 		case m := <-b.bulkQueue:
 			b.onEvents(&m.context, m.events)
 		case <-b.flushTicker.C:
-			b.flush()
+			if len(b.events) > 0 {
+				b.publish()
+			}
 		}
-	}
-}
-
-func (b *bulkWorker) flush() {
-	if len(b.events) > 0 {
-		b.publish()
 	}
 }
 
@@ -99,7 +99,7 @@ func (b *bulkWorker) onEvents(ctx *Context, events []common.MapStr) {
 			if signal != nil {
 				// creating cascading signaler chain for
 				// subset of events being send
-				signal = op.SplitSignaler(signal, 2)
+				signal = outputs.NewSplitSignaler(signal, 2)
 			}
 		}
 
@@ -117,10 +117,11 @@ func (b *bulkWorker) onEvents(ctx *Context, events []common.MapStr) {
 }
 
 func (b *bulkWorker) publish() {
+	// TODO: remember/merge and forward context options to output worker
 	b.output.send(message{
 		context: Context{
 			publishOptions: publishOptions{Guaranteed: b.guaranteed},
-			Signal:         op.CombineSignalers(b.pending...),
+			Signal:         outputs.NewCompositeSignaler(b.pending...),
 		},
 		event:  nil,
 		events: b.events,

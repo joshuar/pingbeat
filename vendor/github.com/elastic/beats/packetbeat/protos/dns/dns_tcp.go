@@ -2,6 +2,7 @@ package dns
 
 import (
 	"encoding/binary"
+	"time"
 
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
@@ -10,7 +11,7 @@ import (
 	"github.com/elastic/beats/packetbeat/protos"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
 
-	mkdns "github.com/miekg/dns"
+	"github.com/tsg/gopacket/layers"
 )
 
 const MaxDnsMessageSize = (1 << 16) - 1
@@ -18,6 +19,15 @@ const MaxDnsMessageSize = (1 << 16) - 1
 // RFC 1035
 // The 2 first bytes contain the length of the message
 const DecodeOffset = 2
+
+// DnsMessage contains a single DNS message.
+type DnsMessage struct {
+	Ts           time.Time          // Time when the message was received.
+	Tuple        common.IpPortTuple // Source and destination addresses of packet.
+	CmdlineTuple *common.CmdlineTuple
+	Data         *layers.DNS // Parsed DNS packet data.
+	Length       int         // Length of the DNS message in bytes (without DecodeOffset).
+}
 
 // DnsStream contains DNS data from one side of a TCP transmission. A pair
 // of DnsStream's are used to represent the full conversation.
@@ -40,7 +50,7 @@ type dnsConnectionData struct {
 func (dns *Dns) Parse(pkt *protos.Packet, tcpTuple *common.TcpTuple, dir uint8, private protos.ProtocolData) protos.ProtocolData {
 	defer logp.Recover("Dns ParseTcp")
 
-	debugf("Parsing packet addressed with %s of length %d.",
+	logp.Debug("dns", "Parsing packet addressed with %s of length %d.",
 		pkt.Tuple.String(), len(pkt.Payload))
 
 	conn := ensureDnsConnection(private)
@@ -85,7 +95,7 @@ func (dns *Dns) doParse(conn *dnsConnectionData, pkt *protos.Packet, tcpTuple *c
 
 		stream.rawData = append(stream.rawData, payload...)
 		if len(stream.rawData) > tcp.TCP_MAX_DATA_IN_STREAM {
-			debugf("Stream data too large, dropping DNS stream")
+			logp.Debug("dns", "Stream data too large, dropping DNS stream")
 			conn.Data[dir] = nil
 			return conn
 		}
@@ -95,7 +105,7 @@ func (dns *Dns) doParse(conn *dnsConnectionData, pkt *protos.Packet, tcpTuple *c
 	if err != nil {
 
 		if err == IncompleteMsg {
-			debugf("Waiting for more raw data")
+			logp.Debug("dns", "Waiting for more raw data")
 			return conn
 		}
 
@@ -103,7 +113,7 @@ func (dns *Dns) doParse(conn *dnsConnectionData, pkt *protos.Packet, tcpTuple *c
 			dns.publishResponseError(conn, err)
 		}
 
-		debugf("%s addresses %s, length %d", err.Error(),
+		logp.Debug("dns", "%s addresses %s, length %d", err.Error(),
 			tcpTuple.String(), len(stream.rawData))
 
 		// This means that malformed requests or responses are being sent...
@@ -125,24 +135,24 @@ func newStream(pkt *protos.Packet, tcpTuple *common.TcpTuple) *DnsStream {
 	}
 }
 
-func (dns *Dns) messageComplete(conn *dnsConnectionData, tcpTuple *common.TcpTuple, dir uint8, decodedData *mkdns.Msg) {
+func (dns *Dns) messageComplete(conn *dnsConnectionData, tcpTuple *common.TcpTuple, dir uint8, decodedData *layers.DNS) {
 	dns.handleDns(conn, tcpTuple, decodedData, dir)
 }
 
-func (dns *Dns) handleDns(conn *dnsConnectionData, tcpTuple *common.TcpTuple, decodedData *mkdns.Msg, dir uint8) {
+func (dns *Dns) handleDns(conn *dnsConnectionData, tcpTuple *common.TcpTuple, decodedData *layers.DNS, dir uint8) {
 	message := conn.Data[dir].message
-	dnsTuple := DnsTupleFromIpPort(&message.Tuple, TransportTcp, decodedData.Id)
+	dnsTuple := DnsTupleFromIpPort(&message.Tuple, TransportTcp, decodedData.ID)
 
 	message.CmdlineTuple = procs.ProcWatcher.FindProcessesTuple(tcpTuple.IpPort())
 	message.Data = decodedData
 	message.Length += DecodeOffset
 
-	if decodedData.Response {
-		dns.receivedDnsResponse(&dnsTuple, message)
-		conn.prevRequest = nil
-	} else /* Query */ {
+	if decodedData.QR == Query {
 		dns.receivedDnsRequest(&dnsTuple, message)
 		conn.prevRequest = message
+	} else /* Response */ {
+		dns.receivedDnsResponse(&dnsTuple, message)
+		conn.prevRequest = nil
 	}
 }
 
@@ -177,7 +187,7 @@ func (dns *Dns) ReceivedFin(tcpTuple *common.TcpTuple, dir uint8, private protos
 		dns.publishResponseError(conn, err)
 	}
 
-	debugf("%s addresses %s, length %d", err.Error(),
+	logp.Debug("dns", "%s addresses %s, length %d", err.Error(),
 		tcpTuple.String(), len(stream.rawData))
 
 	return conn
@@ -208,9 +218,9 @@ func (dns *Dns) GapInStream(tcpTuple *common.TcpTuple, dir uint8, nbytes int, pr
 		dns.publishResponseError(conn, err)
 	}
 
-	debugf("%s addresses %s, length %d", err.Error(),
+	logp.Debug("dns", "%s addresses %s, length %d", err.Error(),
 		tcpTuple.String(), len(stream.rawData))
-	debugf("Dropping the stream %s", tcpTuple.String())
+	logp.Debug("dns", "Dropping the stream %s", tcpTuple.String())
 
 	// drop the stream because it is binary Data and it would be unexpected to have a decodable message later
 	return private, true
@@ -227,7 +237,7 @@ func (dns *Dns) publishResponseError(conn *dnsConnectionData, err error) {
 	}
 
 	dataOrigin := conn.prevRequest.Data
-	dnsTupleOrigin := DnsTupleFromIpPort(&conn.prevRequest.Tuple, TransportTcp, dataOrigin.Id)
+	dnsTupleOrigin := DnsTupleFromIpPort(&conn.prevRequest.Tuple, TransportTcp, dataOrigin.ID)
 	hashDnsTupleOrigin := (&dnsTupleOrigin).Hashable()
 
 	trans := dns.deleteTransaction(hashDnsTupleOrigin)
@@ -251,7 +261,7 @@ func (dns *Dns) publishResponseError(conn *dnsConnectionData, err error) {
 }
 
 // Manages data length prior to decoding the data and manages errors after decoding
-func (stream *DnsStream) handleTcpRawData() (*mkdns.Msg, error) {
+func (stream *DnsStream) handleTcpRawData() (*layers.DNS, error) {
 	rawData := stream.rawData
 	messageLength := len(rawData)
 
@@ -261,18 +271,21 @@ func (stream *DnsStream) handleTcpRawData() (*mkdns.Msg, error) {
 
 	if stream.message.Length == 0 {
 		stream.message.Length = int(binary.BigEndian.Uint16(rawData[:DecodeOffset]))
-		messageLength := stream.message.Length
-		stream.parseOffset = messageLength + DecodeOffset
+		stream.parseOffset = stream.message.Length + DecodeOffset
 
-		// TODO: This means that malformed requests or responses are being sent or
-		// that someone is attempting to the DNS port for non-DNS traffic.
-		// We might want to publish this in the future, for security reasons
-		if messageLength <= 0 {
+		if stream.message.Length <= 0 {
+			// TODO: This means that malformed requests or responses are being sent or
+			// that someone is attempting to the DNS port for non-DNS traffic.
+			// We might want to publish this in the future, for security reasons
 			return nil, ZeroLengthMsg
 		}
-		if messageLength > MaxDnsMessageSize { // Should never be true though ...
-			return nil, UnexpectedLengthMsg
-		}
+	}
+
+	if stream.message.Length > MaxDnsMessageSize { // Should never be true though ...
+		// TODO: This means that malformed requests or responses are being sent or
+		// that someone is attempting to the DNS port for non-DNS traffic. Both
+		// are issues that a monitoring system should report.
+		return nil, UnexpectedLengthMsg
 	}
 
 	if messageLength < stream.parseOffset {

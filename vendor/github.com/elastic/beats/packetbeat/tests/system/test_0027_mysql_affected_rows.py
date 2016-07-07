@@ -1,7 +1,7 @@
-from packetbeat import BaseTest
+from pbtests.packetbeat import TestCase
 
 
-class Test(BaseTest):
+class Test(TestCase):
 
     def test_mysql_affected_rows(self):
         self.render_config_template(
@@ -18,3 +18,4 @@ class Test(BaseTest):
         assert objs[0]["method"] == "UPDATE"
         assert objs[0]["mysql.affected_rows"] == 316
         assert objs[0]["status"] == "OK"
+        assert objs[0]["count"] == 1

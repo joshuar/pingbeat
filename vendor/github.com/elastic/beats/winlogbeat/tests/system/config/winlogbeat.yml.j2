@@ -1,51 +1,21 @@
 ###############################################################################
 ############################# Winlogbeat ######################################
 winlogbeat:
-  {%- if event_logs %}
+  {% if ignore_older %}
+  ignore_older: {{ignore_older}}
+  {% endif %}
+
+  {% if event_logs %}
   event_logs:
-    {% for log in event_logs -%}
+    {% for log in event_logs %}
     - name: {{ log.name }}
-      {%- if log.api is defined %}
-      api: {{ log.api }}
-      {% endif %}
-      {%- if log.ignore_older is defined %}
+      {% if log.ignore_older %}
       ignore_older: {{ log.ignore_older }}
       {% endif %}
-      {%- if log.event_id is defined %}
-      event_id: {{ log.event_id }}
+      {% if log.api %}
+      api: {{ log.api }}
       {% endif %}
-      {%- if log.level is defined %}
-      level: {{ log.level }}
-      {% endif %}
-      {%- if log.provider %}
-      provider:
-        {% for p in log.provider -%}
-        - {{ p }}
-        {% endfor -%}
-      {% endif -%}
-      {%- if log.include_message is defined %}
-      include_message: {{ log.include_message }}
-      {% endif %}
-      {%- if log.include_xml is defined %}
-      include_xml: {{ log.include_xml }}
-      {% endif %}
-      {%- if log.tags is defined %}
-      tags:
-        {% for tag in log.tags -%}
-        - {{ tag }}
-        {% endfor -%}
-      {% endif -%}
-      {%- if log.fields is defined %}
-      {% if log.fields_under_root %}fields_under_root: true{% endif %}
-      fields:
-        {% for k, v in log.fields.items() -%}
-        {{ k }}: {{ v }}
-        {% endfor -%}
-      {% endif %}
-      {%- if log.invalid is defined %}
-      invalid: {{ log.invalid }}
-      {% endif %}
-    {% endfor -%}
+    {% endfor %}
   {% endif %}
 
 ###############################################################################
@@ -56,7 +26,7 @@ winlogbeat:
 
 output:
   file:
-    path: {{ output_file_path | default(beat.working_dir + "/output") }}
+    path: {{ output_file_path | default(winlogbeat.working_dir + "/output") }}
     {% if output_file_filename %}
     filename: "{{ output_file_filename }}"
     {% endif %}
@@ -64,23 +34,19 @@ output:
 
 ############################# Shipper #########################################
 
-{%- if shipper_name %}
-name: {{ shipper_name }}
-{% endif %}
+shipper:
+ {% if shipper_name %}
+ name: {{ shipper_name }}
+ {% endif %}
 
-{%- if tags %}
-tags:
-  {% for tag in tags -%}
-  - {{ tag }}
-  {% endfor -%}
-{% endif %}
-
-{%- if fields %}
-{% if fields_under_root %}fields_under_root: true{% endif %}
-fields:
-  {% for k, v in fields.items() -%}
-  {{ k }}: {{ v }}
-  {% endfor -%}
-{% endif %}
+ {% if tags %}
+ tags: [
+    {%- if agent_tags -%}
+        {%- for tag in agent_tags -%}
+            "{{ tag }}"
+            {%- if not loop.last %}, {% endif -%}
+        {%- endfor -%}
+    {%- endif -%}]
+ {% endif %}
 
 # vim: set ft=jinja:

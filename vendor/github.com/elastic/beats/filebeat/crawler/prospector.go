@@ -2,7 +2,8 @@ package crawler
 
 import (
 	"fmt"
-	"sync"
+	"os"
+	"path/filepath"
 	"time"
 
 	cfg "github.com/elastic/beats/filebeat/config"
@@ -13,37 +14,13 @@ import (
 
 type Prospector struct {
 	ProspectorConfig cfg.ProspectorConfig
-	prospectorer     Prospectorer
-	spoolerChan      chan *input.FileEvent
-	harvesterChan    chan *input.FileEvent
+	prospectorList   map[string]harvester.FileStat
+	iteration        uint32
+	lastscan         time.Time
 	registrar        *Registrar
-	done             chan struct{}
-	harvesterStates  []input.FileState
-	stateMutex       sync.Mutex
-}
-
-type Prospectorer interface {
-	Init()
-	Run()
-}
-
-func NewProspector(prospectorConfig cfg.ProspectorConfig, registrar *Registrar, spoolerChan chan *input.FileEvent) (*Prospector, error) {
-	prospector := &Prospector{
-		ProspectorConfig: prospectorConfig,
-		registrar:        registrar,
-		spoolerChan:      spoolerChan,
-		harvesterChan:    make(chan *input.FileEvent),
-		done:             make(chan struct{}),
-		harvesterStates:  []input.FileState{},
-	}
-
-	err := prospector.Init()
-
-	if err != nil {
-		return nil, err
-	}
-
-	return prospector, nil
+	missingFiles     map[string]os.FileInfo
+	running          bool
+	oldStates        map[string]oldState
 }
 
 // Init sets up default config for prospector
@@ -59,147 +36,7 @@ func (p *Prospector) Init() error {
 		return err
 	}
 
-	var prospectorer Prospectorer
-
-	switch p.ProspectorConfig.Harvester.InputType {
-	case cfg.StdinInputType:
-		prospectorer, err = NewProspectorStdin(p)
-		prospectorer.Init()
-	case cfg.LogInputType:
-		prospectorer, err = NewProspectorLog(p)
-		prospectorer.Init()
-
-	default:
-		return fmt.Errorf("Invalid prospector type: %v", p.ProspectorConfig.Harvester.InputType)
-	}
-
-	p.prospectorer = prospectorer
-
 	return nil
-}
-
-// Starts scanning through all the file paths and fetch the related files. Start a harvester for each file
-func (p *Prospector) Run(wg *sync.WaitGroup) {
-
-	// TODO: Defer the wg.Done() call to block shutdown
-	// Currently there are 2 cases where shutting down the prospector could be blocked:
-	// 1. reading from file
-	// 2. forwarding event to spooler
-	// As this is not implemented yet, no blocking on prospector shutdown is done.
-	wg.Done()
-
-	logp.Info("Starting prospector of type: %v", p.ProspectorConfig.Harvester.InputType)
-
-	// Open channel to receive events from harvester and forward them to spooler
-	// Here potential filtering can happen
-	go func() {
-		for {
-			select {
-			case <-p.done:
-				logp.Info("Prospector stopped")
-				return
-			case event := <-p.harvesterChan:
-				p.spoolerChan <- event
-				p.updateState(event.FileState)
-			}
-		}
-	}()
-
-	// Initial prospector run
-	p.prospectorer.Run()
-
-	for {
-		select {
-		case <-p.done:
-			logp.Info("Prospector stopped")
-			return
-		case <-time.After(p.ProspectorConfig.ScanFrequencyDuration):
-			logp.Info("Run prospector")
-			p.prospectorer.Run()
-		}
-	}
-}
-
-func (p *Prospector) updateState(newState input.FileState) {
-
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
-
-	index, oldState := p.findPreviousState(newState)
-
-	if index >= 0 {
-		p.harvesterStates[index] = newState
-		logp.Debug("prospector", "Old state overwritten for %s", oldState.Source)
-	} else {
-		// No existing state found, add new one
-		p.harvesterStates = append(p.harvesterStates, newState)
-		logp.Debug("prospector", "New state added for %s", newState.Source)
-	}
-}
-
-// findPreviousState returns the previous state fo the file
-// In case no previous state exists, index -1 is returned
-func (p *Prospector) findPreviousState(newState input.FileState) (int, input.FileState) {
-
-	// TODO: This could be made potentially more performance by using an index (harvester id) and only use iteration as fall back
-	for index, oldState := range p.harvesterStates {
-		// This is using the FileStateOS for comparison as FileInfo identifiers can only be fetched for existing files
-		if oldState.FileStateOS.IsSame(newState.FileStateOS) {
-			return index, oldState
-		}
-	}
-
-	return -1, input.FileState{}
-}
-
-// cleanupState cleans up the internal prospector state after each scan
-// Files which reached ignore_older are removed from the state as these states are not needed anymore
-func (p *Prospector) cleanupStates() {
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
-
-	// Cleanup can only happen after file reaches ignore_older
-	if p.ProspectorConfig.IgnoreOlderDuration != 0 {
-		for i, state := range p.harvesterStates {
-			// File is older then ignore_older -> remove state
-			if p.isIgnoreOlder(state) {
-				logp.Debug("prospector", "State removed for %s because of ignore_older: %s", state.Source)
-				p.harvesterStates = append(p.harvesterStates[:i], p.harvesterStates[i+1:]...)
-			}
-		}
-	}
-}
-
-func (p *Prospector) Stop() {
-	logp.Info("Stopping Prospector")
-	close(p.done)
-}
-
-// createHarvester creates a new harvester instance from the given state
-func (p *Prospector) createHarvester(state input.FileState) (*harvester.Harvester, error) {
-
-	h, err := harvester.NewHarvester(
-		&p.ProspectorConfig.Harvester,
-		state.Source,
-		state,
-		p.harvesterChan,
-		state.Offset,
-	)
-
-	return h, err
-}
-
-func (p *Prospector) startHarvester(state input.FileState, offset int64) (*harvester.Harvester, error) {
-	state.Offset = offset
-	// Create harvester with state
-	h, err := p.createHarvester(state)
-	if err != nil {
-		return nil, err
-	}
-
-	h.Start()
-
-	return h, nil
 }
 
 // Setup Prospector Config
@@ -212,26 +49,22 @@ func (p *Prospector) setupProspectorConfig() error {
 		return err
 	}
 
-	config.ScanFrequencyDuration, err = getConfigDuration(config.ScanFrequency, cfg.DefaultScanFrequency, "scan_frequency")
+	config.CloseOlderDuration, err = getConfigDuration(config.CloseOlder, cfg.DefaultCloseOlderDuration, "close_older")
 	if err != nil {
 		return err
 	}
 
-	if config.Harvester.InputType == cfg.LogInputType && len(config.Paths) == 0 {
-		return fmt.Errorf("No paths were defined for prospector")
+	config.ScanFrequencyDuration, err = getConfigDuration(config.ScanFrequency, cfg.DefaultScanFrequency, "scan_frequency")
+	if err != nil {
+		return err
+	}
+	config.ExcludeFilesRegexp, err = harvester.InitRegexps(config.ExcludeFiles)
+	if err != nil {
+		return err
 	}
 
-	if config.Harvester.JSON != nil && len(config.Harvester.JSON.MessageKey) == 0 &&
-		config.Harvester.Multiline != nil {
-
-		return fmt.Errorf("When using the JSON decoder and multiline together, you need to specify a message_key value")
-	}
-
-	if config.Harvester.JSON != nil && len(config.Harvester.JSON.MessageKey) == 0 &&
-		(len(config.Harvester.IncludeLines) > 0 || len(config.Harvester.ExcludeLines) > 0) {
-
-		return fmt.Errorf("When using the JSON decoder and line filtering together, you need to specify a message_key value")
-	}
+	// Init File Stat list
+	p.prospectorList = make(map[string]harvester.FileStat)
 
 	return nil
 }
@@ -243,34 +76,31 @@ func (p *Prospector) setupHarvesterConfig() error {
 	config := &p.ProspectorConfig.Harvester
 
 	// Setup Buffer Size
-	if config.BufferSize <= 0 {
+	if config.BufferSize == 0 {
 		config.BufferSize = cfg.DefaultHarvesterBufferSize
 	}
-	logp.Info("buffer_size set to: %v", config.BufferSize)
 
 	// Setup DocumentType
 	if config.DocumentType == "" {
 		config.DocumentType = cfg.DefaultDocumentType
 	}
-	logp.Info("document_type set to: %v", config.DocumentType)
 
 	// Setup InputType
 	if _, ok := cfg.ValidInputType[config.InputType]; !ok {
 		logp.Info("Invalid input type set: %v", config.InputType)
 		config.InputType = cfg.DefaultInputType
 	}
-	logp.Info("input_type set to: %v", config.InputType)
+	logp.Info("Input type set to: %v", config.InputType)
 
 	config.BackoffDuration, err = getConfigDuration(config.Backoff, cfg.DefaultBackoff, "backoff")
 	if err != nil {
 		return err
 	}
 
-	// Setup Backoff factor
-	if config.BackoffFactor <= 0 {
+	// Setup DocumentType
+	if config.BackoffFactor == 0 {
 		config.BackoffFactor = cfg.DefaultBackoffFactor
 	}
-	logp.Info("backoff_factor set to: %v", config.BackoffFactor)
 
 	config.MaxBackoffDuration, err = getConfigDuration(config.MaxBackoff, cfg.DefaultMaxBackoff, "max_backoff")
 	if err != nil {
@@ -282,16 +112,6 @@ func (p *Prospector) setupHarvesterConfig() error {
 	} else {
 		logp.Info("force_close_file is disabled")
 	}
-
-	config.CloseOlderDuration, err = getConfigDuration(config.CloseOlder, cfg.DefaultCloseOlderDuration, "close_older")
-	if err != nil {
-		return err
-	}
-
-	if config.MaxBytes <= 0 {
-		config.MaxBytes = cfg.DefaultMaxBytes
-	}
-	logp.Info("max_bytes set to: %v", config.MaxBytes)
 
 	return nil
 }
@@ -315,19 +135,364 @@ func getConfigDuration(config string, duration time.Duration, name string) (time
 	return duration, nil
 }
 
-// isIgnoreOlder checks if the given state reached ignore_older
-func (p *Prospector) isIgnoreOlder(state input.FileState) bool {
+// Starts scanning through all the file paths and fetch the related files. Start a harvester for each file
+func (p *Prospector) Run(spoolChan chan *input.FileEvent) {
 
-	// ignore_older is disable
-	if p.ProspectorConfig.IgnoreOlderDuration == 0 {
-		return false
+	p.running = true
+
+	logp.Info("Starting prospector of type: %v", p.ProspectorConfig.Harvester.InputType)
+	switch p.ProspectorConfig.Harvester.InputType {
+	case cfg.StdinInputType:
+		p.stdinRun(spoolChan)
+		return
+	case cfg.LogInputType:
+		p.logRun(spoolChan)
+		return
 	}
 
-	modTime := state.Fileinfo.ModTime()
+	logp.Info("Invalid prospector type: %v")
+}
 
-	if time.Since(modTime) > p.ProspectorConfig.IgnoreOlderDuration {
-		return true
+func (p *Prospector) logRun(spoolChan chan *input.FileEvent) {
+
+	// Seed last scan time
+	p.lastscan = time.Now()
+
+	logp.Debug("prospector", "exclude_files: %s", p.ProspectorConfig.ExcludeFiles)
+
+	// Now let's do one quick scan to pick up new files
+	for _, path := range p.ProspectorConfig.Paths {
+		p.scan(path, spoolChan)
+	}
+
+	// This signals we finished considering the previous state
+	event := &input.FileState{
+		Source: "",
+	}
+	p.registrar.Persist <- event
+
+	for {
+		newlastscan := time.Now()
+
+		for _, path := range p.ProspectorConfig.Paths {
+			p.scan(path, spoolChan)
+		}
+
+		p.lastscan = newlastscan
+
+		// Defer next scan for the defined scanFrequency
+		time.Sleep(p.ProspectorConfig.ScanFrequencyDuration)
+		logp.Debug("prospector", "Start next scan")
+
+		// Clear out files that disappeared and we've stopped harvesting
+		for file, lastinfo := range p.prospectorList {
+			if lastinfo.Finished() && lastinfo.LastIteration < p.iteration {
+				delete(p.prospectorList, file)
+			}
+		}
+
+		p.iteration++ // Overflow is allowed
+
+		if !p.running {
+			break
+		}
+	}
+}
+
+func (p *Prospector) stdinRun(spoolChan chan *input.FileEvent) {
+	h, err := harvester.NewHarvester(
+		p.ProspectorConfig,
+		&p.ProspectorConfig.Harvester,
+		"-",
+		nil,
+		spoolChan,
+	)
+
+	if err != nil {
+		logp.Err("Error initializing stdin harvester: %v", err)
+		return
+	}
+
+	// This signals we finished considering the previous state
+	event := &input.FileState{
+		Source: "",
+	}
+	p.registrar.Persist <- event
+
+	h.Start()
+
+	for {
+		if !p.running {
+			break
+		}
+		// Wait time during endless loop
+		oneSecond, _ := time.ParseDuration("1s")
+		time.Sleep(oneSecond)
+	}
+}
+
+func (p *Prospector) isFileExcluded(file string) bool {
+
+	config := &p.ProspectorConfig
+
+	if len(config.ExcludeFilesRegexp) > 0 {
+
+		if harvester.MatchAnyRegexps(config.ExcludeFilesRegexp, file) {
+			return true
+		}
 	}
 
 	return false
+}
+
+type oldState struct {
+	fileinfo os.FileInfo
+	lastinfo harvester.FileStat
+	newInfo  *harvester.FileStat
+	isKnown  bool
+	offset   int64
+	resuming bool
+}
+
+// Scans the specific path which can be a glob (/**/**/*.log)
+// For all found files it is checked if a harvester should be started
+func (p *Prospector) scan(path string, output chan *input.FileEvent) {
+
+	logp.Debug("prospector", "scan path %s", path)
+
+	// Evaluate the path as a wildcards/shell glob
+	matches, err := filepath.Glob(path)
+	if err != nil {
+		logp.Debug("prospector", "glob(%s) failed: %v", path, err)
+		return
+	}
+
+	p.missingFiles = map[string]os.FileInfo{}
+	p.oldStates = map[string]oldState{}
+
+	// Check any matched files to see if we need to start a harvester
+	for _, file := range matches {
+		logp.Debug("prospector", "Check file for harvesting: %s", file)
+
+		// check if the file is in the exclude_files list
+		if p.isFileExcluded(file) {
+			logp.Debug("prospector", "Exclude file: %s", file)
+			continue
+		}
+
+		// Stat the file, following any symlinks.
+		fileinfo, err := os.Stat(file)
+
+		// TODO(sissel): check err
+		if err != nil {
+			logp.Debug("prospector", "stat(%s) failed: %s", file, err)
+			continue
+		}
+
+		if fileinfo.IsDir() {
+			logp.Debug("prospector", "Skipping directory: %s", file)
+			continue
+		}
+
+		// Check the current info against p.prospectorinfo[file]
+		lastinfo, isKnown := p.prospectorList[file]
+
+		// Create a new prospector info with the stat info for comparison
+		newInfo := harvester.NewFileStat(fileinfo, p.iteration)
+
+		// Call crawler if there if there exists a state for the given file
+		offset, resuming := p.registrar.fetchState(file, newInfo.Fileinfo)
+
+		p.oldStates[file] = oldState{
+			fileinfo: fileinfo,
+			lastinfo: lastinfo,
+			isKnown:  isKnown,
+			newInfo:  newInfo,
+			offset:   offset,
+			resuming: resuming,
+		}
+	}
+
+	for file, oldState := range p.oldStates {
+		newFile := input.File{
+			FileInfo: oldState.fileinfo,
+		}
+
+		oldFile := input.File{
+			FileInfo: oldState.lastinfo.Fileinfo,
+		}
+
+		// Conditions for starting a new harvester:
+		// - file path hasn't been seen before
+		// - the file's inode or device changed
+		if !oldState.isKnown {
+			p.checkNewFile(oldState.newInfo, file, output, oldState)
+		} else {
+			oldState.newInfo.Continue(&oldState.lastinfo)
+			p.checkExistingFile(oldState.newInfo, &newFile, &oldFile, file, output, oldState)
+		}
+
+		// Track the stat data for this file for later comparison to check for
+		// rotation/etc
+		p.prospectorList[file] = *oldState.newInfo
+	} // for each file matched by the glob
+}
+
+// Check if harvester for new file has to be started
+// For a new file the following options exist:
+func (p *Prospector) checkNewFile(newinfo *harvester.FileStat, file string, output chan *input.FileEvent, oldState oldState) {
+
+	logp.Debug("prospector", "Start harvesting unknown file: %s", file)
+
+	// Init harvester with info
+	h, err := harvester.NewHarvester(
+		p.ProspectorConfig, &p.ProspectorConfig.Harvester, file, newinfo, output)
+	if err != nil {
+		logp.Err("Error initializing harvester: %v", err)
+		return
+	}
+
+	// Check for unmodified time, but only if the file modification time is before the last scan started
+	// This ensures we don't skip genuine creations with dead times less than 10s
+	if newinfo.Fileinfo.ModTime().Before(p.lastscan) &&
+		p.ProspectorConfig.IgnoreOlderDuration != 0 &&
+		time.Since(newinfo.Fileinfo.ModTime()) > p.ProspectorConfig.IgnoreOlderDuration {
+
+		if oldState.offset == newinfo.Fileinfo.Size() {
+			logp.Debug("prospector", "File size of ignore_file didn't change. Nothing to do: %s", file)
+			return
+		}
+
+		logp.Debug("prospector", "Fetching old state of file to resume: %s", file)
+
+		// Are we resuming a dead file? We have to resume even if dead so we catch any old updates to the file
+		// This is safe as the harvester, once it hits the EOF and a timeout, will stop harvesting
+		// Once we detect changes again we can resume another harvester again - this keeps number of go routines to a minimum
+		if oldState.resuming {
+			logp.Debug("prospector", "Resuming harvester on a previously harvested file: %s", file)
+
+			h.SetOffset(oldState.offset)
+			h.Start()
+		} else {
+			// Old file, skip it, but push offset of file size so we start from the end if this file changes and needs picking up
+			logp.Debug("prospector", "Skipping file (older than ignore older of %v, %v): %s",
+				p.ProspectorConfig.IgnoreOlderDuration,
+				time.Since(newinfo.Fileinfo.ModTime()),
+				file)
+			h.SetOffset(newinfo.Fileinfo.Size())
+		}
+		p.registrar.Persist <- h.GetState()
+	} else if previousFile, err := p.getPreviousFile(file, newinfo.Fileinfo); err == nil {
+		// This file was simply renamed (known inode+dev) - link the same harvester channel as the old file
+		logp.Debug("prospector", "File rename was detected, not a new file: %s -> %s", previousFile, file)
+
+		h.SetOffset(oldState.offset)
+		h.SetPath(file)
+
+		p.registrar.Persist <- h.GetState()
+	} else {
+
+		// Are we resuming a file or is this a completely new file?
+		if oldState.resuming {
+			logp.Debug("prospector", "Resuming harvester on a previously harvested file: %s", file)
+		} else {
+			logp.Debug("prospector", "Launching harvester on new file: %s", file)
+		}
+
+		// Launch the harvester
+		h.SetOffset(oldState.offset)
+		h.Start()
+		p.registrar.Persist <- h.GetState()
+	}
+}
+
+// checkExistingFile checks if a harvester has to be started for a already known file
+// For existing files the following options exist:
+// * Last reading position is 0, no harvester has to be started as old harvester probably still busy
+// * The old known modification time is older then the current one. Start at last known position
+// * The new file is not the same as the old file, means file was renamed
+// ** New file is actually really a new file, start a new harvester
+// ** Renamed file has a state, continue there
+func (p *Prospector) checkExistingFile(newinfo *harvester.FileStat, newFile *input.File, oldFile *input.File, file string, output chan *input.FileEvent, oldState oldState) {
+
+	logp.Debug("prospector", "Update existing file for harvesting: %s", file)
+
+	h, err := harvester.NewHarvester(
+		p.ProspectorConfig, &p.ProspectorConfig.Harvester,
+		file, newinfo, output)
+	if err != nil {
+		logp.Err("Error initializing harvester: %v", err)
+		return
+	}
+
+	if !oldFile.IsSameFile(newFile) {
+
+		if previousFile, err := p.getPreviousFile(file, newinfo.Fileinfo); err == nil {
+			// This file was renamed from another file we know - link the same harvester channel as the old file
+			logp.Debug("prospector", "File rename was detected, existing file: %s -> %s", previousFile, file)
+			logp.Debug("prospector", "Launching harvester on renamed file: %s", file)
+
+			h.SetOffset(oldState.offset)
+			h.SetPath(file)
+
+			p.registrar.Persist <- h.GetState()
+		} else {
+			// File is not the same file we saw previously, it must have rotated and is a new file
+			logp.Debug("prospector", "Launching harvester on new file: %s. Old file was probably rotated", file)
+
+			// Forget about the previous harvester and let it continue on the old file - so start a new channel to use with the new harvester
+			newinfo.Ignore()
+
+			// Start a new harvester on the path
+			h.Start()
+			p.registrar.Persist <- h.GetState()
+		}
+
+		// Keep the old file in missingFiles so we don't rescan it if it was renamed and we've not yet reached the new filename
+		// We only need to keep it for the remainder of this iteration then we can assume it was deleted and forget about it
+		p.missingFiles[file] = oldFile.FileInfo
+
+	} else if newinfo.Finished() && oldFile.FileInfo.ModTime() != newinfo.Fileinfo.ModTime() {
+		// Resume harvesting of an old file we've stopped harvesting from
+		logp.Debug("prospector", "Resuming harvester on an old file that was just modified: %s", file)
+
+		// Start a harvester on the path; an old file was just modified and it doesn't have a harvester
+		// The offset to continue from will be stored in the harvester channel - so take that to use and also clear the channel
+		h.SetOffset(<-newinfo.Return)
+		h.Start()
+		p.registrar.Persist <- h.GetState()
+	} else {
+		logp.Debug("prospector", "Not harvesting, file didn't change: %s", file)
+	}
+}
+
+func (p *Prospector) Stop() {
+	// TODO: Stopping is currently not implemented
+}
+
+// Check if the given file was renamed. If file is known but with different path,
+// the previous file path will be returned. If no file is found, an error
+// will be returned.
+func (p *Prospector) getPreviousFile(file string, info os.FileInfo) (string, error) {
+
+	for path, pFileStat := range p.prospectorList {
+		if path == file {
+			continue
+		}
+
+		if os.SameFile(info, pFileStat.Fileinfo) {
+			return path, nil
+		}
+	}
+
+	// Now check the missingfiles
+	for path, fileInfo := range p.missingFiles {
+
+		if os.SameFile(info, fileInfo) {
+			return path, nil
+		}
+	}
+
+	// NOTE(ruflin): should instead an error be returned if not previous file?
+	return "", fmt.Errorf("No previous file found")
 }

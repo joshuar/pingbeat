@@ -1,5 +1,3 @@
-// +build !integration
-
 package input
 
 import (
@@ -17,7 +15,7 @@ func TestGetOSFileState(t *testing.T) {
 	fileinfo, err := file.Stat()
 	assert.Nil(t, err)
 
-	state := GetOSFileState(fileinfo)
+	state := GetOSFileState(&fileinfo)
 
 	assert.True(t, state.IdxHi > 0)
 	assert.True(t, state.IdxLo > 0)
@@ -31,7 +29,7 @@ func TestGetOSFileStateStat(t *testing.T) {
 	fileinfo, err := os.Stat(file.Name())
 	assert.Nil(t, err)
 
-	state := GetOSFileState(fileinfo)
+	state := GetOSFileState(&fileinfo)
 
 	assert.True(t, state.IdxHi > 0)
 	assert.True(t, state.IdxLo > 0)

@@ -7,7 +7,7 @@ The `interfaces` section configures the sniffer. Here is an example configuratio
 ------------------------------------------------------------------------------
 # Select the network interfaces to sniff the data. You can use the "any"
 # keyword to sniff on all connected interfaces.
-packetbeat.interfaces:
+interfaces:
   # On which device to sniff
   device: any
 
@@ -34,7 +34,7 @@ Example:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: eth0
 ------------------------------------------------------------------------------
 
@@ -73,7 +73,7 @@ first interface in the list:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: 0
 ------------------------------------------------------------------------------
 
@@ -90,7 +90,7 @@ Example:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: eth0
   snaplen: 1514
 ------------------------------------------------------------------------------
@@ -114,7 +114,7 @@ the `af_packet` sniffing type:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: eth0
   type: af_packet
 ------------------------------------------------------------------------------
@@ -137,7 +137,7 @@ Example:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: eth0
   type: af_packet
   buffer_size_mb: 100
@@ -168,7 +168,7 @@ You can use the `bpf_filter` setting to overwrite the generated BPF filter. For 
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: eth0
   bpf_filter: "net 192.168.238.0/0 and port 80 and port 3306"
 ------------------------------------------------------------------------------
@@ -176,38 +176,6 @@ packetbeat.interfaces:
 NOTE: This setting disables automatic generation of the BPF filter. If
 you use this setting, it's your responsibility to keep the BPF filters in sync with the
 ports defined in the `protocols` section.
-
-
-[[configuration-flows]]
-=== Flows
-
-The `flows` section contains configuration options for bidirectional network
-flows. If section is missing from configuration file, network flows are
-disabled.
-
-[source,yaml]
-------------------------------------------------------------------------------
-packetbeat.flows:
-  timeout: 30s
-  period: 10s
-------------------------------------------------------------------------------
-
-==== Options
-
-You can specify the following options in the `flows` section:
-
-===== timeout
-
-Timeout configures the lifetime of a flow. If no packets have been received for
-a flow within the timeout time window, the flow is killed and reported. The
-default value is 30s.
-
-===== period
-
-Configure the reporting interval. All flows are reported at the very same point
-in time. Periodical reporting can be disabled by setting the value to -1. If
-disabled, flows are still reported once being timed out. The default value is
-10s.
 
 
 [[configuration-protocols]]
@@ -221,7 +189,6 @@ Currently, Packetbeat supports the following protocols:
  - ICMP (v4 and v6)
  - DNS
  - HTTP
- - AMQP 0.9.1
  - Mysql
  - PostgreSQL
  - Redis
@@ -233,7 +200,7 @@ Example configuration:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.protocols:
+protocols:
   icmp:
     enabled: true
 
@@ -242,9 +209,6 @@ packetbeat.protocols:
 
   http:
     ports: [80, 8080, 8000, 5000, 8002]
-
-  amqp:
-    ports: [5672]
 
   memcache:
     ports: [11211]
@@ -304,7 +268,7 @@ You can specify the following options in the `icmp` section for the ICMP protoco
 
 ===== enabled
 
-The ICMP protocol can be enabled/disabled via this option. The default is false.
+The ICMP protocol can be enabled/disabled via this option.
 
 If enabled Packetbeat will generate the following BPF filter: `"icmp or icmp6"`.
 
@@ -314,7 +278,7 @@ The `dns` section specifies configuration options for the DNS protocol. The DNS 
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.protocols:
+protocols:
   dns:
     ports: [53]
 
@@ -345,7 +309,7 @@ sample configuration section:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.protocols:
+protocols:
   http:
 
     # Configure the ports where to listen for HTTP traffic. You can disable
@@ -418,7 +382,7 @@ Example configuration:
 
 [source,yml]
 ------------------------------------------------------------------------------
-packetbeat.protocols:
+protocols:
   http:
     ports: [80, 8080]
     send_response: true
@@ -465,47 +429,6 @@ you want to capture traffic behind a reverse proxy, but you want to get the geo-
 information. If this header is present and contains a valid IP addresses, the
 information is used for the `real_ip` and `client_location` indexed
 fields.
-
-
-==== AMQP Configuration Options
-
-The `amqp` section specifies configuration options for the AMQP 0.9.1
-protocol. Here is a sample configuration:
-
-[source,yaml]
-------------------------------------------------------------------------------
-  amqp:
-    ports: [5672]
-    max_body_length: 1000
-    parse_headers: true
-    parse_arguments: false
-    hide_connection_information: true
-------------------------------------------------------------------------------
-
-===== max_body_length
-
-The maximum size in bytes of the message displayed in the request or response fields.
-Messages that are bigger than the specified size are truncated. Use this option to
-avoid publishing huge messages when <<send-request-option>> or <<send-request-option>>
-is enabled. The default is 1000 bytes.
-
-===== parse_headers
-
-If set to true, Packetbeat parses the additional arguments specified in the headers field
-of a message. Those arguments are key-value pairs that specify information such as the
-content type of the message or the message priority. The default is true.
-
-===== parse_arguments
-
-If set to true, Packetbeat parses the additional arguments specified in AMQP methods.
-Those arguments are key-value pairs specified by the user and can be of any length.
-The default is true.
-
-===== hide_connection_information
-
-If set to false, the connection layer methods of the protocol are also
-displayed, such as the opening and closing of connections and channels by clients,
-or the quality of service negotiation. The default is true.
 
 ==== Memcache Configuration Options
 
@@ -559,7 +482,7 @@ quiet requests with an error response are published immediately.
 
 ==== MySQL and PgSQL Configuration Options
 
-You can specify the following options in the `mysql` or `pgsql` sections:
+You can specify the following options in the `mysql` or `pgsql` sections: 
 
 ===== max_rows
 
@@ -708,7 +631,7 @@ Example configuration:
 
 [source,yaml]
 ------------------------------------------------------------------------------
-packetbeat.procs:
+procs:
   enabled: true
   monitored:
     - process: mysqld
@@ -745,10 +668,7 @@ include::../../../../libbeat/docs/outputconfig.asciidoc[]
 
 include::../../../../libbeat/docs/shipperconfig.asciidoc[]
 
-include::../../../../libbeat/docs/shared-path-config.asciidoc[]
-
 include::../../../../libbeat/docs/loggingconfig.asciidoc[]
 
 include::../../../../libbeat/docs/runconfig.asciidoc[]
 
-include::../../../../libbeat/docs/filteringconfig.asciidoc[]

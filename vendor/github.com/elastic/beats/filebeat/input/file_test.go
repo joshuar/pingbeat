@@ -1,5 +1,3 @@
-// +build !integration
-
 package input
 
 import (
@@ -7,9 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/elastic/beats/filebeat/config"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/stretchr/testify/assert"
 )
@@ -61,50 +57,50 @@ func TestSafeFileRotateExistingFile(t *testing.T) {
 		assert.NoError(t, os.RemoveAll(tempdir))
 	}()
 
-	// create an existing registry file
-	err = ioutil.WriteFile(filepath.Join(tempdir, "registry"),
+	// create an existing .filebeat file
+	err = ioutil.WriteFile(filepath.Join(tempdir, ".filebeat"),
 		[]byte("existing filebeat"), 0x777)
 	assert.NoError(t, err)
 
-	// create a new registry.new file
-	err = ioutil.WriteFile(filepath.Join(tempdir, "registry.new"),
+	// create a new .filebeat.new file
+	err = ioutil.WriteFile(filepath.Join(tempdir, ".filebeat.new"),
 		[]byte("new filebeat"), 0x777)
 	assert.NoError(t, err)
 
-	// rotate registry.new into registry
-	err = SafeFileRotate(filepath.Join(tempdir, "registry"),
-		filepath.Join(tempdir, "registry.new"))
+	// rotate .filebeat.new into .filebeat
+	err = SafeFileRotate(filepath.Join(tempdir, ".filebeat"),
+		filepath.Join(tempdir, ".filebeat.new"))
 	assert.NoError(t, err)
 
-	contents, err := ioutil.ReadFile(filepath.Join(tempdir, "registry"))
+	contents, err := ioutil.ReadFile(filepath.Join(tempdir, ".filebeat"))
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("new filebeat"), contents)
 
 	// do it again to make sure we deal with deleting the old file
 
-	err = ioutil.WriteFile(filepath.Join(tempdir, "registry.new"),
+	err = ioutil.WriteFile(filepath.Join(tempdir, ".filebeat.new"),
 		[]byte("new filebeat 1"), 0x777)
 	assert.NoError(t, err)
 
-	err = SafeFileRotate(filepath.Join(tempdir, "registry"),
-		filepath.Join(tempdir, "registry.new"))
+	err = SafeFileRotate(filepath.Join(tempdir, ".filebeat"),
+		filepath.Join(tempdir, ".filebeat.new"))
 	assert.NoError(t, err)
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempdir, "registry"))
+	contents, err = ioutil.ReadFile(filepath.Join(tempdir, ".filebeat"))
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("new filebeat 1"), contents)
 
 	// and again for good measure
 
-	err = ioutil.WriteFile(filepath.Join(tempdir, "registry.new"),
+	err = ioutil.WriteFile(filepath.Join(tempdir, ".filebeat.new"),
 		[]byte("new filebeat 2"), 0x777)
 	assert.NoError(t, err)
 
-	err = SafeFileRotate(filepath.Join(tempdir, "registry"),
-		filepath.Join(tempdir, "registry.new"))
+	err = SafeFileRotate(filepath.Join(tempdir, ".filebeat"),
+		filepath.Join(tempdir, ".filebeat.new"))
 	assert.NoError(t, err)
 
-	contents, err = ioutil.ReadFile(filepath.Join(tempdir, "registry"))
+	contents, err = ioutil.ReadFile(filepath.Join(tempdir, ".filebeat"))
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("new filebeat 2"), contents)
 }
@@ -117,162 +113,22 @@ func TestFileEventToMapStr(t *testing.T) {
 	assert.False(t, found)
 }
 
-func TestFileEventToMapStrJSON(t *testing.T) {
-	type io struct {
-		Event         FileEvent
-		ExpectedItems common.MapStr
-	}
-
-	text := "hello"
-
-	now := time.Now()
-
-	tests := []io{
-		{
-			// by default, don't overwrite keys
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "text": "hello"},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true},
-			},
-			ExpectedItems: common.MapStr{
-				"type": "test_type",
-				"text": "hello",
-			},
-		},
-		{
-			// overwrite keys if asked
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "text": "hello"},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"type": "test",
-				"text": "hello",
-			},
-		},
-		{
-			// without keys_under_root, put everything in a json key
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "text": "hello"},
-				JSONConfig:   &config.JSONConfig{},
-			},
-			ExpectedItems: common.MapStr{
-				"json": common.MapStr{"type": "test", "text": "hello"},
-				"type": "test_type",
-			},
-		},
-		{
-			// when MessageKey is defined, the Text overwrites the value of that key
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "text": "hi"},
-				JSONConfig:   &config.JSONConfig{MessageKey: "text"},
-			},
-			ExpectedItems: common.MapStr{
-				"json": common.MapStr{"type": "test", "text": "hello"},
-				"type": "test_type",
-			},
-		},
-		{
-			// when @timestamp is in JSON and overwrite_keys is true, parse it
-			// in a common.Time
-			Event: FileEvent{
-				ReadTime:     now,
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "@timestamp": "2016-04-05T18:47:18.444Z"},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"@timestamp": common.MustParseTime("2016-04-05T18:47:18.444Z"),
-				"type":       "test",
-			},
-		},
-		{
-			// when the parsing on @timestamp fails, leave the existing value and add an error key
-			// in a common.Time
-			Event: FileEvent{
-				ReadTime:     now,
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "@timestamp": "2016-04-05T18:47:18.44XX4Z"},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"@timestamp": common.Time(now),
-				"type":       "test",
-				"json_error": "@timestamp not overwritten (parse error on 2016-04-05T18:47:18.44XX4Z)",
-			},
-		},
-		{
-			// when the @timestamp has the wrong type, leave the existing value and add an error key
-			// in a common.Time
-			Event: FileEvent{
-				ReadTime:     now,
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "test", "@timestamp": 42},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"@timestamp": common.Time(now),
-				"type":       "test",
-				"json_error": "@timestamp not overwritten (not string)",
-			},
-		},
-		{
-			// if overwrite_keys is true, but the `type` key in json is not a string, ignore it
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": 42},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"type":       "test_type",
-				"json_error": "type not overwritten (not string)",
-			},
-		},
-		{
-			// if overwrite_keys is true, but the `type` key in json is empty, ignore it
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": ""},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"type":       "test_type",
-				"json_error": "type not overwritten (invalid value [])",
-			},
-		},
-		{
-			// if overwrite_keys is true, but the `type` key in json starts with _, ignore it
-			Event: FileEvent{
-				DocumentType: "test_type",
-				Text:         &text,
-				JSONFields:   common.MapStr{"type": "_type"},
-				JSONConfig:   &config.JSONConfig{KeysUnderRoot: true, OverwriteKeys: true},
-			},
-			ExpectedItems: common.MapStr{
-				"type":       "test_type",
-				"json_error": "type not overwritten (invalid value [_type])",
-			},
+func TestFieldsUnderRoot(t *testing.T) {
+	event := FileEvent{
+		Fields: &common.MapStr{
+			"hello": "world",
 		},
 	}
+	event.SetFieldsUnderRoot(true)
+	mapStr := event.ToMapStr()
+	_, found := mapStr["fields"]
+	assert.False(t, found)
+	assert.Equal(t, "world", mapStr["hello"])
 
-	for _, test := range tests {
-		result := test.Event.ToMapStr()
-		t.Log("Executing test:", test)
-		for k, v := range test.ExpectedItems {
-			assert.Equal(t, v, result[k])
-		}
-	}
+	event.SetFieldsUnderRoot(false)
+	mapStr = event.ToMapStr()
+	_, found = mapStr["hello"]
+	assert.False(t, found)
+	_, found = mapStr["fields"]
+	assert.True(t, found)
 }

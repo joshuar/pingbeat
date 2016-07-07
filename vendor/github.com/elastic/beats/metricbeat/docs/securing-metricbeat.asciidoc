@@ -1,8 +1,0 @@
-[[securing-meticbeat]]
-== Securing {beatname_uc}
-
-The following topics describe how to secure communication between
-{beatname_uc} and other products in the Elastic stack:
-
-* <<securing-communication-elasticsearch>>
-* <<configuring-tls-logstash>>

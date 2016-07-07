@@ -106,7 +106,7 @@ server on which Packetbeat is installed. For this, use `any` as the device:
 ----------------------------------------------------------------------
 # Select the network interfaces to sniff the data. You can use the "any"
 # keyword to sniff on all connected interfaces.
-packetbeat.interfaces:
+interfaces:
   device: any
 ----------------------------------------------------------------------
 
@@ -131,7 +131,7 @@ Modify the `device` line to point to the index of the device:
 +
 [source,yml]
 ----------------------------------------------------------------------
-packetbeat.interfaces:
+interfaces:
   device: 0
 ----------------------------------------------------------------------
 
@@ -141,7 +141,7 @@ default values should do just fine.
 +
 [source,yaml]
 ----------------------------------------------------------------------
-packetbeat.protocols:
+protocols:
   dns:
     ports: [53]
 
@@ -255,7 +255,8 @@ an example. We recommend that you
 http://www.elastic.co/guide/en/kibana/current/dashboard.html[customize] it
 to meet your needs.
 
-For more information, see
-{libbeat}/load-kibana-dashboards.html[Loading the Beats Dashboards].
+For more information about loading and viewing the Beats dashboards, see
+{libbeat}/visualizing-data.html[Visualizing Your Data in Kibana].
 
 image:./images/packetbeat-statistics.png[Packetbeat statistics]
+

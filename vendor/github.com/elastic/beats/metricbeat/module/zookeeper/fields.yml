@@ -1,5 +1,0 @@
-zookeeper:
-  type: group
-  description: >
-    ZooKeeper metrics collected by the four-letter monitoring commands.
-  fields:

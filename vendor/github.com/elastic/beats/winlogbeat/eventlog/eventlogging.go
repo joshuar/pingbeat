@@ -5,13 +5,9 @@ package eventlog
 import (
 	"fmt"
 	"syscall"
-	"time"
 
-	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/winlogbeat/sys"
-	win "github.com/elastic/beats/winlogbeat/sys/eventlogging"
-	"github.com/joeshaw/multierror"
+	sys "github.com/elastic/beats/winlogbeat/sys/eventlogging"
 )
 
 const (
@@ -20,52 +16,19 @@ const (
 	eventLoggingAPIName = "eventlogging"
 )
 
-var eventLoggingConfigKeys = append(commonConfigKeys, "ignore_older",
-	"read_buffer_size", "format_buffer_size")
-
-type eventLoggingConfig struct {
-	ConfigCommon     `config:",inline"`
-	IgnoreOlder      time.Duration          `config:"ignore_older"`
-	ReadBufferSize   uint                   `config:"read_buffer_size"   validate:"min=1"`
-	FormatBufferSize uint                   `config:"format_buffer_size" validate:"min=1"`
-	Raw              map[string]interface{} `config:",inline"`
-}
-
-// Validate validates the eventLoggingConfig data and returns an error
-// describing any problems or nil.
-func (c *eventLoggingConfig) Validate() error {
-	var errs multierror.Errors
-	if c.Name == "" {
-		errs = append(errs, fmt.Errorf("event log is missing a 'name'"))
-	}
-
-	if c.ReadBufferSize > win.MaxEventBufferSize {
-		errs = append(errs, fmt.Errorf("'read_buffer_size' must be less than "+
-			"%d bytes", win.MaxEventBufferSize))
-	}
-
-	if c.FormatBufferSize > win.MaxFormatMessageBufferSize {
-		errs = append(errs, fmt.Errorf("'format_buffer_size' must be less than "+
-			"%d bytes", win.MaxFormatMessageBufferSize))
-	}
-
-	return errs.Err()
-}
-
 // Validate that eventLogging implements the EventLog interface.
 var _ EventLog = &eventLogging{}
 
 // eventLogging implements the EventLog interface for reading from the Event
 // Logging API.
 type eventLogging struct {
-	config        eventLoggingConfig
-	name          string               // Name of the log that is opened.
-	handle        win.Handle           // Handle to the event log.
-	readBuf       []byte               // Buffer for reading in events.
-	formatBuf     []byte               // Buffer for formatting messages.
-	handles       *messageFilesCache   // Cached mapping of source name to event message file handles.
-	logPrefix     string               // Prefix to add to all log entries.
-	eventMetadata common.EventMetadata // Fields and tags to add to each event.
+	uncServerPath string             // UNC name of remote server.
+	name          string             // Name of the log that is opened.
+	handle        sys.Handle         // Handle to the event log.
+	readBuf       []byte             // Buffer for reading in events.
+	formatBuf     []byte             // Buffer for formatting messages.
+	handles       *messageFilesCache // Cached mapping of source name to event message file handles.
+	logPrefix     string             // Prefix to add to all log entries.
 
 	recordNumber uint32 // First record number to read.
 	seek         bool   // Read should use seek.
@@ -78,14 +41,14 @@ func (l eventLogging) Name() string {
 }
 
 func (l *eventLogging) Open(recordNumber uint64) error {
-	detailf("%s Open(recordNumber=%d) calling OpenEventLog(uncServerPath=, "+
-		"providerName=%s)", l.logPrefix, recordNumber, l.name)
-	handle, err := win.OpenEventLog("", l.name)
+	detailf("%s Open(recordNumber=%d) calling OpenEventLog(uncServerPath=%s, "+
+		"providerName=%s)", l.logPrefix, recordNumber, l.uncServerPath, l.name)
+	handle, err := sys.OpenEventLog(l.uncServerPath, l.name)
 	if err != nil {
 		return err
 	}
 
-	numRecords, err := win.GetNumberOfEventLogRecords(handle)
+	numRecords, err := sys.GetNumberOfEventLogRecords(handle)
 	if err != nil {
 		return err
 	}
@@ -96,7 +59,7 @@ func (l *eventLogging) Open(recordNumber uint64) error {
 		l.seek = true
 		l.ignoreFirst = true
 
-		oldestRecord, err = win.GetOldestEventLogRecord(handle)
+		oldestRecord, err = sys.GetOldestEventLogRecord(handle)
 		if err != nil {
 			return err
 		}
@@ -121,9 +84,9 @@ func (l *eventLogging) Open(recordNumber uint64) error {
 }
 
 func (l *eventLogging) Read() ([]Record, error) {
-	flags := win.EVENTLOG_SEQUENTIAL_READ | win.EVENTLOG_FORWARDS_READ
+	flags := sys.EVENTLOG_SEQUENTIAL_READ | sys.EVENTLOG_FORWARDS_READ
 	if l.seek {
-		flags = win.EVENTLOG_SEEK_READ | win.EVENTLOG_FORWARDS_READ
+		flags = sys.EVENTLOG_SEEK_READ | sys.EVENTLOG_FORWARDS_READ
 		l.seek = false
 	}
 
@@ -133,7 +96,7 @@ func (l *eventLogging) Read() ([]Record, error) {
 			l.readBuf = l.readBuf[0:cap(l.readBuf)]
 			// TODO: Use number of bytes to grow the buffer size as needed.
 			var err error
-			numBytesRead, err = win.ReadEventLog(
+			numBytesRead, err = sys.ReadEventLog(
 				l.handle,
 				flags,
 				l.recordNumber,
@@ -148,7 +111,7 @@ func (l *eventLogging) Read() ([]Record, error) {
 	detailf("%s ReadEventLog read %d bytes", l.logPrefix, numBytesRead)
 
 	l.readBuf = l.readBuf[0:numBytesRead]
-	events, _, err := win.RenderEvents(
+	events, _, err := sys.RenderEvents(
 		l.readBuf[:numBytesRead], 0, l.formatBuf, l.handles.get)
 	if err != nil {
 		return nil, err
@@ -157,38 +120,52 @@ func (l *eventLogging) Read() ([]Record, error) {
 
 	records := make([]Record, 0, len(events))
 	for _, e := range events {
-		// The events do not contain the name of the event log so we must add
-		// the name of the log from which we are reading.
-		e.Channel = l.name
-
-		err = sys.PopulateAccount(&e.User)
-		if err != nil {
-			debugf("%s SID %s account lookup failed. %v", l.logPrefix,
-				e.User.Identifier, err)
+		r := Record{
+			API:            eventLoggingAPIName,
+			EventLogName:   l.name,
+			RecordNumber:   uint64(e.RecordID),
+			EventID:        e.EventID, // TODO: Subtract out high order bytes (upper 2 bytes)
+			Level:          e.Level,
+			SourceName:     e.SourceName,
+			ComputerName:   e.Computer,
+			Category:       e.Category,
+			Message:        e.Message,
+			MessageInserts: e.MessageInserts,
+			MessageErr:     e.MessageErr,
 		}
 
-		records = append(records, Record{
-			API:           eventLoggingAPIName,
-			EventMetadata: l.eventMetadata,
-			Event:         e,
-		})
+		if e.TimeGenerated != nil {
+			r.TimeGenerated = *e.TimeGenerated
+		} else if e.TimeWritten != nil {
+			r.TimeGenerated = *e.TimeWritten
+		}
+
+		if e.UserSID != nil {
+			r.User = &User{
+				Identifier: e.UserSID.Identifier,
+				Name:       e.UserSID.Name,
+				Domain:     e.UserSID.Domain,
+				Type:       e.UserSID.Type.String(),
+			}
+		}
+
+		records = append(records, r)
 	}
 
 	if l.ignoreFirst && len(records) > 0 {
-		debugf("%s Ignoring first event with record ID %d", l.logPrefix,
-			records[0].RecordID)
+		debugf("%s Ignoring first event with record number %d", l.logPrefix,
+			records[0].RecordNumber)
 		records = records[1:]
 		l.ignoreFirst = false
 	}
 
-	records = filter(records, l.ignoreOlder)
 	debugf("%s Read() is returning %d records", l.logPrefix, len(records))
 	return records, nil
 }
 
 func (l *eventLogging) Close() error {
 	debugf("%s Closing handle", l.logPrefix)
-	return win.CloseEventLog(l.handle)
+	return sys.CloseEventLog(l.handle)
 }
 
 // readRetryErrorHandler handles errors returned from the readEventLog function
@@ -199,10 +176,10 @@ func (l *eventLogging) readRetryErrorHandler(err error) error {
 		var reopen bool
 
 		switch errno {
-		case win.ERROR_EVENTLOG_FILE_CHANGED:
+		case sys.ERROR_EVENTLOG_FILE_CHANGED:
 			debugf("Re-opening event log because event log file was changed")
 			reopen = true
-		case win.ERROR_EVENTLOG_FILE_CORRUPT:
+		case sys.ERROR_EVENTLOG_FILE_CORRUPT:
 			debugf("Re-opening event log because event log file is corrupt")
 			reopen = true
 		}
@@ -219,61 +196,30 @@ func (l *eventLogging) readRetryErrorHandler(err error) error {
 func readErrorHandler(err error) ([]Record, error) {
 	switch err {
 	case syscall.ERROR_HANDLE_EOF,
-		win.ERROR_EVENTLOG_FILE_CHANGED,
-		win.ERROR_EVENTLOG_FILE_CORRUPT:
+		sys.ERROR_EVENTLOG_FILE_CHANGED,
+		sys.ERROR_EVENTLOG_FILE_CORRUPT:
 		return []Record{}, nil
 	}
 	return nil, err
 }
 
-// Filter returns a new slice holding only the elements of s that satisfy the
-// predicate fn().
-func filter(in []Record, fn func(*Record) bool) []Record {
-	var out []Record
-	for _, r := range in {
-		if fn(&r) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// ignoreOlder is a filter predicate that checks the record timestamp and
-// returns true if the event was not matched by the filter.
-func (l *eventLogging) ignoreOlder(r *Record) bool {
-	if l.config.IgnoreOlder != 0 && time.Since(r.TimeCreated.SystemTime) > l.config.IgnoreOlder {
-		return false
-	}
-
-	return true
-}
-
 // newEventLogging creates and returns a new EventLog for reading event logs
 // using the Event Logging API.
-func newEventLogging(options map[string]interface{}) (EventLog, error) {
-	c := eventLoggingConfig{
-		ReadBufferSize:   win.MaxEventBufferSize,
-		FormatBufferSize: win.MaxFormatMessageBufferSize,
-	}
-	if err := readConfig(options, &c, eventLoggingConfigKeys); err != nil {
-		return nil, err
-	}
-
+func newEventLogging(c Config) (EventLog, error) {
 	return &eventLogging{
-		config: c,
-		name:   c.Name,
-		handles: newMessageFilesCache(c.Name, win.QueryEventMessageFiles,
-			win.FreeLibrary),
-		logPrefix:     fmt.Sprintf("EventLogging[%s]", c.Name),
-		readBuf:       make([]byte, 0, c.ReadBufferSize),
-		formatBuf:     make([]byte, c.FormatBufferSize),
-		eventMetadata: c.EventMetadata,
+		uncServerPath: c.RemoteAddress,
+		name:          c.Name,
+		handles: newMessageFilesCache(c.Name, sys.QueryEventMessageFiles,
+			sys.FreeLibrary),
+		logPrefix: fmt.Sprintf("EventLogging[%s]", c.Name),
+		readBuf:   make([]byte, 0, sys.MaxEventBufferSize),
+		formatBuf: make([]byte, sys.MaxFormatMessageBufferSize),
 	}, nil
 }
 
 func init() {
 	// Register eventlogging API if it is available.
-	available, _ := win.IsAvailable()
+	available, _ := sys.IsAvailable()
 	if available {
 		Register(eventLoggingAPIName, 1, newEventLogging, nil)
 	}

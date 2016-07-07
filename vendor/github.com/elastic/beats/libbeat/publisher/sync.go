@@ -1,27 +1,45 @@
 package publisher
 
-import "github.com/elastic/beats/libbeat/common/op"
+import (
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/outputs"
+)
 
-type syncPipeline struct {
-	pub *Publisher
+type syncPublisher struct {
+	pub *PublisherType
 }
 
-func newSyncPipeline(pub *Publisher, hwm, bulkHWM int) *syncPipeline {
-	return &syncPipeline{pub: pub}
+type syncClient func(message) bool
+
+func newSyncPublisher(pub *PublisherType, hwm, bulkHWM int) *syncPublisher {
+	return &syncPublisher{pub: pub}
 }
 
-func (p *syncPipeline) publish(m message) bool {
+func (p *syncPublisher) client() eventPublisher {
+	return p
+}
+
+func (p *syncPublisher) PublishEvent(ctx Context, event common.MapStr) bool {
+	msg := message{context: ctx, event: event}
+	return p.send(msg)
+}
+
+func (p *syncPublisher) PublishEvents(ctx Context, events []common.MapStr) bool {
+	msg := message{context: ctx, events: events}
+	return p.send(msg)
+}
+
+func (p *syncPublisher) send(m message) bool {
 	if p.pub.disabled {
 		debug("publisher disabled")
-		op.SigCompleted(m.context.Signal)
+		outputs.SignalCompleted(m.context.Signal)
 		return true
 	}
 
-	client := m.client
 	signal := m.context.Signal
-	sync := op.NewSignalChannel()
+	sync := outputs.NewSyncSignal()
 	if len(p.pub.Output) > 1 {
-		m.context.Signal = op.SplitSignaler(sync, len(p.pub.Output))
+		m.context.Signal = outputs.NewSplitSignaler(sync, len(p.pub.Output))
 	} else {
 		m.context.Signal = sync
 	}
@@ -30,13 +48,11 @@ func (p *syncPipeline) publish(m message) bool {
 		o.send(m)
 	}
 
-	// Await completion signal from output plugin. If client has been disconnected
-	// ignore any signal and drop events no matter if send or not.
-	select {
-	case <-client.canceler.Done():
-		return true
-	case sig := <-sync.C:
-		sig.Apply(signal)
-		return sig == op.SignalCompleted
+	ok := sync.Wait()
+	if ok {
+		outputs.SignalCompleted(signal)
+	} else if signal != nil {
+		signal.Failed()
 	}
+	return ok
 }
