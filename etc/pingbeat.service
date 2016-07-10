@@ -1,12 +1,13 @@
 [Unit]
-Description=Pingbeat
+Description=Pingbeat sends ICMP packets and stores the RTT in Elasticsearch
 After=network.target
 
 [Service]
-Restart=always
-ExecStart=/usr/local/bin/pingbeat -c /etc/pingbeat/pingbeat.yml
+Type=simple
+Restart=on-failure
+ExecStart=/usr/bin/pingbeat -c /etc/pingbeat/pingbeat.yml
 ProtectSystem=on
 ProtectHome=read-only
 
 [Install]
-WantedBy=local.target
+WantedBy=multi-user.target
