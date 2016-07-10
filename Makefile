@@ -22,7 +22,7 @@ else
 endif
 
 test:
-	go test
+	go test $(glide novendor)
 
 clean:
 	rm ./glide

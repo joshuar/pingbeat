@@ -8,6 +8,7 @@ pingbeat
 /build
 _obj
 _test
+/vendor
 
 # Files
 .DS_Store

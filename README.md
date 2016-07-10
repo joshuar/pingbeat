@@ -21,11 +21,13 @@ libbeat, see
 
 Install and configure [Go](https://golang.org/doc/install).
 
-Install and update this go package with:
+Clone this repo:
 
+``` shell
+git clone git@github.com:joshuar/pingbeat.git
 ```
-go get -u github.com/joshuar/pingbeat
-```
+
+Run `make install` in the repo directory.
 
 The `pingbeat` binary will then be available in `$GOPATH/bin`.
 
@@ -33,7 +35,7 @@ If intending on using the Elasticsearch output, you should add a
 new index template using the
 [supplied one](etc/pingbeat.template.json), for example with:
 
-```
+``` shell
 curl -XPUT  /_template/pingbeat -d @/path/to/pingbeat.template.json
 
 ```
@@ -51,14 +53,14 @@ pingbeat data.
 Once you've created a configuration file you can run
 pingbeat with:
 
-```
+``` shell
 pingbeat -c /path/to/beat.yml
 
 ```
 
 To run Pingbeat with debugging output enabled, run:
 
-```
+``` shell
 ./pingbeat -c pingbeat.yml -e -d "*"
 
 ```
