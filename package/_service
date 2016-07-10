@@ -1,0 +1,7 @@
+<services>
+  <service name="download_url">
+    <param name="protocol">https</param>
+    <param name="host">github.com</param>
+    <param name="path">/joshuar/pingbeat</param>
+  </service>
+</services>
