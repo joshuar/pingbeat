@@ -1,11 +1,16 @@
 package: github.com/joshuar/pingbeat
 import:
-- package: github.com/elastic/beats
-  version: v1.2.3
+- package: github.com/elastic/beats/libbeat
+  version: ^1.0.0
   subpackages:
-  - libbeat/beat
-  - libbeat/cfgfile
-  - libbeat/common
-  - libbeat/logp
-  - libbeat/publisher
-- package: github.com/tatsushid/go-fastping
+  - beat
+  - cfgfile
+  - common
+  - logp
+  - publisher
+- package: golang.org/x/net
+  subpackages:
+  - icmp
+  - ipv4
+- package: gopkg.in/go-playground/pool.v3
+  version: ^3.1.0

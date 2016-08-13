@@ -1,13 +1,16 @@
-package beater
+package pingbeat
 
 import (
-	"github.com/elastic/libbeat/beat"
-	"github.com/elastic/libbeat/cfgfile"
-	"github.com/elastic/libbeat/common"
-	"github.com/elastic/libbeat/logp"
-	"github.com/elastic/libbeat/publisher"
+	"github.com/elastic/beats/libbeat/beat"
+	"github.com/elastic/beats/libbeat/cfgfile"
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/publisher"
 	cfg "github.com/joshuar/pingbeat/config"
-	"github.com/tatsushid/go-fastping"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"gopkg.in/go-playground/pool.v3"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -22,20 +25,12 @@ type Pingbeat struct {
 	period      time.Duration
 	timeout     time.Duration
 	pingType    string
+	iface       string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
 	config      cfg.ConfigSettings
 	events      publisher.Client
 	done        chan struct{}
-}
-
-// response struct is filled with ICMP response
-// and passed through channels
-type response struct {
-	name string
-	addr *net.IPAddr
-	rtt  time.Duration
-	tag  string
 }
 
 func New() *Pingbeat {
@@ -59,6 +54,14 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		p.period = 5 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
+
+	// Use interface specified in config
+	if &p.config.Input.Interface != nil {
+		p.iface = *p.config.Input.Interface
+	} else {
+		logp.Critical("Error: no targets specified, cannot continue!")
+		os.Exit(1)
+	}
 
 	// Check if we can use privileged (i.e. raw socket) ping,
 	// else use a UDP ping
@@ -109,99 +112,89 @@ func (p *Pingbeat) Setup(b *beat.Beat) error {
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
 
-	fp := fastping.NewPinger()
+	pool := pool.New()
+	defer pool.Close()
 
-	// Set the MaxRTT, i.e., the interval between pinging a target
-	fp.MaxRTT = p.period
+	ticker := time.NewTicker(p.period)
+	defer ticker.Stop()
 
-	errInput, err := fp.Network(p.pingType)
-	results := make(map[string]*response)
+	c, err := icmp.ListenPacket("ip4:icmp", "<placeholder>")
 	if err != nil {
-		logp.Critical("Error: %v (input %v)", err, errInput)
-		os.Exit(1)
+		log.Fatal(err)
 	}
-
-	if p.useIPv4 {
-		for addr, details := range p.ipv4targets {
-			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-			fp.AddIP(addr)
-			results[addr] = nil
-		}
-	}
-	if p.useIPv6 {
-		for addr, details := range p.ipv6targets {
-			logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-			fp.AddIP(addr)
-			results[addr] = nil
-		}
-	}
-
-	onRecv, onIdle := make(chan *response), make(chan bool)
-	fp.OnRecv = func(addr *net.IPAddr, t time.Duration) {
-		// Find the name and tag associated with this address
-		name, tag := p.Addr2Name(addr)
-		// Send the name, addr, rtt and tag as a struct through the onRecv channel
-		onRecv <- &response{name: name, addr: addr, rtt: t, tag: tag}
-	}
-	fp.OnIdle = func() {
-		onIdle <- true
-	}
-
-	fp.RunLoop()
+	defer c.Close()
 
 	for {
 		select {
 		case <-p.done:
-			logp.Debug("pingbeat", "Got interrupted, shutting down\n")
-			fp.Stop()
+			pool.Cancel()
 			return nil
-		case res := <-onRecv:
-			results[res.addr.String()] = res
-		case <-onIdle:
-			for target, r := range results {
-				if r == nil {
-					var name, tag string
-					if _, found := p.ipv4targets[target]; found {
-						name = p.ipv4targets[target][0]
-						tag = p.ipv4targets[target][1]
-					} else if _, found := p.ipv6targets[target]; found {
-						name = p.ipv6targets[target][0]
-						tag = p.ipv6targets[target][1]
-					} else {
-						logp.Warn("Error: Unexpected target returned: %s", target)
-						break
-					}
-					// Packet loss
-					event := common.MapStr{
-						"@timestamp":  common.Time(time.Now()),
-						"type":        "pingbeat",
-						"target_name": name,
-						"target_addr": target,
-						"tag":         tag,
-						"loss":        true,
-					}
-					p.events.PublishEvent(event)
-				} else {
-					// Success, ping received
-					event := common.MapStr{
-						"@timestamp":  common.Time(time.Now()),
-						"type":        "pingbeat",
-						"target_name": r.name,
-						"target_addr": target,
-						"tag":         r.tag,
-						"rtt":         milliSeconds(r.rtt),
-					}
-					p.events.PublishEvent(event)
+		case <-ticker.C:
+		}
+
+		batch := pool.Batch()
+		if p.useIPv4 {
+			go func() {
+				i := 0
+				for addr, details := range p.ipv4targets {
+					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+					req := PingRequest{}
+					req.Encode(i+1, ipv4.ICMPTypeEcho, addr, p.iface)
+					batch.Queue(PingTarget(&req, c))
 				}
-				results[target] = nil
+
+				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
+				// if calling Cancel() it calles QueueComplete() internally
+				batch.QueueComplete()
+			}()
+		}
+		if p.useIPv6 {
+			go func() {
+				i := 0
+				for addr, details := range p.ipv4targets {
+					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+					req := PingRequest{}
+					req.Encode(i+1, ipv4.ICMPTypeEcho, addr, "wlp2s0")
+					batch.Queue(PingTarget(&req, c))
+				}
+
+				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
+				// if calling Cancel() it calles QueueComplete() internally
+				batch.QueueComplete()
+			}()
+		}
+		for result := range batch.Results() {
+			if err := result.Error(); err != nil {
+				log.Printf("Error: %v: %v", err, result.Value().(PingReply).target.String())
+				// handle error
+				// maybe call batch.Cancel()
+			} else {
+				target := result.Value().(PingReply).target.String()
+				rtt := result.Value().(PingReply).rtt
+
+				var name, tag string
+				if _, found := p.ipv4targets[target]; found {
+					name = p.ipv4targets[target][0]
+					tag = p.ipv4targets[target][1]
+				} else if _, found := p.ipv6targets[target]; found {
+					name = p.ipv6targets[target][0]
+					tag = p.ipv6targets[target][1]
+				} else {
+					logp.Warn("Error: Unexpected target returned: %s", target)
+				}
+				event := common.MapStr{
+					"@timestamp":  common.Time(time.Now()),
+					"type":        "pingbeat",
+					"target_name": name,
+					"target_addr": target,
+					"tag":         tag,
+					"rtt":         milliSeconds(rtt),
+				}
+				p.events.PublishEvent(event)
 			}
-		case <-fp.Done():
-			if err = fp.Err(); err != nil {
-				logp.Critical("Error: Ping failed %v", err)
-			}
-			break
 		}
 	}
+
 }
 
 func (p *Pingbeat) Cleanup(b *beat.Beat) error {
@@ -294,4 +287,34 @@ func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
 		tag = "err"
 	}
 	return name, tag
+}
+
+func PingTarget(req *PingRequest, c *icmp.PacketConn) pool.WorkFunc {
+	return func(wu pool.WorkUnit) (interface{}, error) {
+		rep := PingReply{}
+		rep.binary_payload = make([]byte, 1500)
+		rep.target = req.target
+		begin := time.Now()
+		if _, err := c.WriteTo(req.binary_payload, req.target); err != nil {
+			return rep, err
+		}
+		if err := c.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			return rep, err
+		}
+		n, peer, err := c.ReadFrom(rep.binary_payload)
+		if err != nil {
+			return rep, err
+		}
+		rep.ping_type = req.ping_type
+		rep.target = peer
+		rep.rtt = time.Since(begin)
+		rep.Decode(n)
+		if wu.IsCancelled() {
+			// return values not used
+			return nil, nil
+		}
+
+		// ready for processing...
+		return rep, nil
+	}
 }
