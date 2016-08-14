@@ -1,0 +1,94 @@
+################### Pingbeat Configuration Example #########################
+
+############################# Input ############################################
+input:
+  period: 10s
+  privileged: true
+  useipv4: true
+  useipv6: false
+  interface: wlp2s0
+  targets:
+    google:
+      - google.com.au
+      - smtp.gmail.com
+    barefoot:
+      - www.barefoottelecom.com.au
+      - voice.mibroadband.com.au
+    amazon:
+      - ec2.ap-southeast-2.amazonaws.com
+      - s3-ap-southeast-2.amazonaws.com
+      - cloudfront.amazonaws.com
+    lan:
+      - fritz.box
+      - repeater.fritz.box
+      - dlinkap.fritz.box
+      - macmini.fritz.box
+      - loro.fritz.box
+      - ipcam1.fritz.box
+      - ipcam2.fritz.box
+      - ipcam3.fritz.box
+    wan:
+      - ttrss.astralcars.com
+      - sayuriandjosh.com
+    nzb:
+      - newshost.co.za
+      - news.supernews.com
+      - althub.co.za
+      - binsearch.info
+      - nzbclub.com
+    github:
+      - github.com
+      - gist.github.com
+    misc:
+      - bba-syd.crashplan.com
+      - mirrors.fedoraproject.org
+      - tweetdeck.twitter.com
+      - wikipedia.org
+      - wikileaks.org
+      - tumblr.com
+      - imgur.com
+      - giphy.com
+      - reddit.com
+      - twitter.com
+      - linkedin.com
+      - imdb.com
+      - mailinator.com
+    elastic:
+      - elastic.slack.com
+      - elastic.my.salesforce.com
+      - login.salesforce.com
+    dns:
+      - nc1.syd.iprimus.net.au
+      - nc2.syd.iprimus.net.au
+      - google-public-dns-a.google.com
+      - google-public-dns-b.google.com
+      - resolver1.opendns.com
+      - resolver2.opendns.com
+    mirror:
+      - mirror.aarnet.edu.au
+      - ftp.iinet.net.au
+      - mirror.internode.on.net
+      - mirror.digitalpacific.net.au
+
+############################# Output ##########################################
+
+output:
+  # elasticsearch:
+  #   hosts: ["localhost:9200"]
+  # file:
+  #   path: "/var/log"
+  #   filename: "pingbeat.log"
+  #   rotate_every_kb: 1000
+  #   number_of_files: 7
+  console:
+    pretty: true
+
+############################# Shipper #########################################
+
+shipper:
+
+############################# Logging #########################################
+
+logging:
+  to_syslog: true
+  level: info

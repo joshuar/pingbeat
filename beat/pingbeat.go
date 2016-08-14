@@ -1,6 +1,8 @@
 package pingbeat
 
 import (
+	// "errors"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -9,8 +11,8 @@ import (
 	cfg "github.com/joshuar/pingbeat/config"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 	"gopkg.in/go-playground/pool.v3"
-	"log"
 	"net"
 	"os"
 	"time"
@@ -49,9 +51,15 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 
 	// Use period provided in config or default to 5s
 	if p.config.Input.Period != nil {
-		p.period = time.Duration(*p.config.Input.Period) * time.Second
+		duration, err := time.ParseDuration(*p.config.Input.Period)
+		p.period = duration
+		if duration < time.Second || err != nil {
+			logp.Warn("pingbeat", "Error parsing duration or duration too small. Setting to default 10s")
+			p.period = 10 * time.Second
+		}
 	} else {
-		p.period = 5 * time.Second
+		logp.Warn("pingbeat", "No period set. Setting to default 10s")
+		p.period = 10 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
 
@@ -111,16 +119,17 @@ func (p *Pingbeat) Setup(b *beat.Beat) error {
 }
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
-
 	pool := pool.New()
 	defer pool.Close()
 
 	ticker := time.NewTicker(p.period)
 	defer ticker.Stop()
 
-	c, err := icmp.ListenPacket("ip4:icmp", "<placeholder>")
+	var seq_no = 0
+
+	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
-		log.Fatal(err)
+		logp.Critical("Error: Could not create connection: %v", err)
 	}
 	defer c.Close()
 
@@ -135,12 +144,12 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		batch := pool.Batch()
 		if p.useIPv4 {
 			go func() {
-				i := 0
 				for addr, details := range p.ipv4targets {
 					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 					req := PingRequest{}
-					req.Encode(i+1, ipv4.ICMPTypeEcho, addr, p.iface)
-					batch.Queue(PingTarget(&req, c))
+					req.Encode(seq_no, ipv4.ICMPTypeEcho, addr, p.iface)
+					seq_no++
+					batch.Queue(PingTarget(&req, c, p.period))
 				}
 
 				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
@@ -150,12 +159,12 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		}
 		if p.useIPv6 {
 			go func() {
-				i := 0
-				for addr, details := range p.ipv4targets {
+				for addr, details := range p.ipv6targets {
 					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 					req := PingRequest{}
-					req.Encode(i+1, ipv4.ICMPTypeEcho, addr, "wlp2s0")
-					batch.Queue(PingTarget(&req, c))
+					req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr, p.iface)
+					seq_no++
+					batch.Queue(PingTarget(&req, c, p.period))
 				}
 
 				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
@@ -165,11 +174,11 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		}
 		for result := range batch.Results() {
 			if err := result.Error(); err != nil {
-				log.Printf("Error: %v: %v", err, result.Value().(PingReply).target.String())
+				logp.Err("Error: %v: %v", err, result.Value().(PingReply).target)
 				// handle error
 				// maybe call batch.Cancel()
 			} else {
-				target := result.Value().(PingReply).target.String()
+				target := result.Value().(PingReply).target
 				rtt := result.Value().(PingReply).rtt
 
 				var name, tag string
@@ -203,36 +212,6 @@ func (p *Pingbeat) Cleanup(b *beat.Beat) error {
 
 func (p *Pingbeat) Stop() {
 	close(p.done)
-}
-
-// milliSeconds converts seconds to milliseconds
-func milliSeconds(d time.Duration) float64 {
-	msec := d / time.Millisecond
-	nsec := d % time.Millisecond
-	return float64(msec) + float64(nsec)*1e-6
-}
-
-// FetchIPs takes a target hostname, resolves the IP addresses for that
-// hostname via DNS and returns the results through the ip4addr/ip6addr
-// channels
-func FetchIPs(ip4addr, ip6addr chan string, target string) {
-	addrs, err := net.LookupIP(target)
-	if err != nil {
-		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
-	} else {
-		for j := 0; j < len(addrs); j++ {
-			if addrs[j].To4() != nil {
-				ip4addr <- addrs[j].String()
-			} else {
-				ip6addr <- addrs[j].String()
-			}
-		}
-	}
-	ip4addr <- "done"
-	close(ip4addr)
-	ip6addr <- "done"
-	close(ip6addr)
-	return
 }
 
 // AddTarget takes a target name and tag, fetches the IP addresses associated
@@ -289,32 +268,67 @@ func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
 	return name, tag
 }
 
-func PingTarget(req *PingRequest, c *icmp.PacketConn) pool.WorkFunc {
+// milliSeconds converts seconds to milliseconds
+func milliSeconds(d time.Duration) float64 {
+	msec := d / time.Millisecond
+	nsec := d % time.Millisecond
+	return float64(msec) + float64(nsec)*1e-6
+}
+
+// FetchIPs takes a target hostname, resolves the IP addresses for that
+// hostname via DNS and returns the results through the ip4addr/ip6addr
+// channels
+func FetchIPs(ip4addr, ip6addr chan string, target string) {
+	addrs, err := net.LookupIP(target)
+	if err != nil {
+		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
+	} else {
+		for j := 0; j < len(addrs); j++ {
+			if addrs[j].To4() != nil {
+				ip4addr <- addrs[j].String()
+			} else {
+				ip6addr <- addrs[j].String()
+			}
+		}
+	}
+	ip4addr <- "done"
+	close(ip4addr)
+	ip6addr <- "done"
+	close(ip6addr)
+	return
+}
+
+func PingTarget(req *PingRequest, c *icmp.PacketConn, timeout time.Duration) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		rep := PingReply{}
 		rep.binary_payload = make([]byte, 1500)
-		rep.target = req.target
+		rep.target = req.target.String()
 		begin := time.Now()
 		if _, err := c.WriteTo(req.binary_payload, req.target); err != nil {
+			logp.Warn("pingbeat", "PingTarget: %v", err)
 			return rep, err
 		}
-		if err := c.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			logp.Warn("pingbeat", "PingTarget: %v", err)
 			return rep, err
 		}
 		n, peer, err := c.ReadFrom(rep.binary_payload)
 		if err != nil {
+			logp.Warn("pingbeat", "PingTarget: %v", err)
 			return rep, err
 		}
-		rep.ping_type = req.ping_type
-		rep.target = peer
 		rep.rtt = time.Since(begin)
+		rep.ping_type = req.ping_type
+		rep.target = peer.String()
 		rep.Decode(n)
+		// if rep.text_payload.Body != req.text_payload.Body {
+		// 	err := errors.New("sequence number mismatch")
+		// 	return rep, err
+		// }
 		if wu.IsCancelled() {
 			// return values not used
 			return nil, nil
 		}
-
-		// ready for processing...
 		return rep, nil
 	}
 }

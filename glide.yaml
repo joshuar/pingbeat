@@ -12,5 +12,6 @@ import:
   subpackages:
   - icmp
   - ipv4
+  - ipv6
 - package: gopkg.in/go-playground/pool.v3
   version: ^3.1.0
