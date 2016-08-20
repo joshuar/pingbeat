@@ -151,9 +151,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					seq_no++
 					batch.Queue(PingTarget(&req, c, p.period))
 				}
-
-				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
-				// if calling Cancel() it calles QueueComplete() internally
 				batch.QueueComplete()
 			}()
 		}
@@ -166,31 +163,29 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					seq_no++
 					batch.Queue(PingTarget(&req, c, p.period))
 				}
-
-				// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
-				// if calling Cancel() it calles QueueComplete() internally
 				batch.QueueComplete()
 			}()
 		}
 		for result := range batch.Results() {
 			if err := result.Error(); err != nil {
-				logp.Err("Error: %v: %v", err, result.Value().(PingReply).target)
-				// handle error
-				// maybe call batch.Cancel()
+				target := result.Value().(PingReply).target
+
+				name, tag := p.FetchDetails(target)
+				event := common.MapStr{
+					"@timestamp":  common.Time(time.Now()),
+					"type":        "pingbeat",
+					"target_name": name,
+					"target_addr": target,
+					"tag":         tag,
+					"loss":        true,
+				}
+				p.events.PublishEvent(event)
 			} else {
 				target := result.Value().(PingReply).target
 				rtt := result.Value().(PingReply).rtt
 
-				var name, tag string
-				if _, found := p.ipv4targets[target]; found {
-					name = p.ipv4targets[target][0]
-					tag = p.ipv4targets[target][1]
-				} else if _, found := p.ipv6targets[target]; found {
-					name = p.ipv6targets[target][0]
-					tag = p.ipv6targets[target][1]
-				} else {
-					logp.Warn("Error: Unexpected target returned: %s", target)
-				}
+				name, tag := p.FetchDetails(target)
+
 				event := common.MapStr{
 					"@timestamp":  common.Time(time.Now()),
 					"type":        "pingbeat",
@@ -203,7 +198,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			}
 		}
 	}
-
 }
 
 func (p *Pingbeat) Cleanup(b *beat.Beat) error {
@@ -252,16 +246,16 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 
 // Addr2Name takes a net.IPAddr and returns the name and tag
 // associated with that address in the Pingbeat struct
-func (p *Pingbeat) Addr2Name(addr *net.IPAddr) (string, string) {
+func (p *Pingbeat) FetchDetails(addr string) (string, string) {
 	var name, tag string
-	if _, found := p.ipv4targets[addr.String()]; found {
-		name = p.ipv4targets[addr.String()][0]
-		tag = p.ipv4targets[addr.String()][1]
-	} else if _, found := p.ipv6targets[addr.String()]; found {
-		name = p.ipv6targets[addr.String()][0]
-		tag = p.ipv6targets[addr.String()][1]
+	if _, found := p.ipv4targets[addr]; found {
+		name = p.ipv4targets[addr][0]
+		tag = p.ipv4targets[addr][1]
+	} else if _, found := p.ipv6targets[addr]; found {
+		name = p.ipv6targets[addr][0]
+		tag = p.ipv6targets[addr][1]
 	} else {
-		logp.Err("Error: %s not found in Pingbeat targets!", addr.String())
+		logp.Err("Error: %s not found in Pingbeat targets!", addr)
 		name = "err"
 		tag = "err"
 	}
@@ -302,7 +296,7 @@ func PingTarget(req *PingRequest, c *icmp.PacketConn, timeout time.Duration) poo
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		rep := PingReply{}
 		rep.binary_payload = make([]byte, 1500)
-		rep.target = req.target.String()
+		rep.target = req.target.IP.String()
 		begin := time.Now()
 		if _, err := c.WriteTo(req.binary_payload, req.target); err != nil {
 			logp.Warn("pingbeat", "PingTarget: %v", err)
