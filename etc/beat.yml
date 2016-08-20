@@ -11,8 +11,6 @@ input:
   # Whether to perform IPv4/v6 pings
   useipv4: true
   useipv6: false
-  # Network Interface to send pings out on
-  interface: en0
   # List targets under the tag you want assigned to
   targets:
     # tag: google

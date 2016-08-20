@@ -6,7 +6,6 @@ type PingConfig struct {
 	UseIPv6    *bool
 	Privileged *bool
 	Targets    *map[string][]string
-	Interface  *string
 }
 
 type ConfigSettings struct {

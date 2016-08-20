@@ -1,8 +1,7 @@
 package pingbeat
 
 import (
-	// "errors"
-	// "github.com/davecgh/go-spew/spew"
+	"errors"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -28,7 +27,6 @@ type Pingbeat struct {
 	timeout     time.Duration
 	ipv4network string
 	ipv6network string
-	iface       string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
 	config      cfg.ConfigSettings
@@ -64,20 +62,12 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
 
-	// Use interface specified in config
-	if &p.config.Input.Interface != nil {
-		p.iface = *p.config.Input.Interface
-	} else {
-		logp.Critical("Error: no targets specified, cannot continue!")
-		os.Exit(1)
-	}
-
 	// Check if we can use privileged (i.e. raw socket) ping,
 	// else use a UDP ping
 	if *p.config.Input.Privileged {
 		if os.Getuid() != 0 {
-			logp.Critical("Error: Privileged set but not running with privleges!")
-			os.Exit(1)
+			err := errors.New("Privileged set but not running with privleges!")
+			return err
 		}
 		p.ipv4network = "ip4:icmp"
 		p.ipv6network = "ip6:ipv6-icmp"
@@ -100,7 +90,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	} else {
 		p.useIPv6 = false
 	}
-	logp.Debug("pingbeat", "Use IPv4? %v, Use IPv6? %v\n", p.useIPv4, p.useIPv6)
+	logp.Debug("pingbeat", "Using IPv4: %v. Using IPv6: %v\n", p.useIPv4, p.useIPv6)
 
 	// Fill the IPv4/IPv6 targets maps
 	p.ipv4targets = make(map[string][2]string)
@@ -112,8 +102,8 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 			}
 		}
 	} else {
-		logp.Critical("Error: no targets specified, cannot continue!")
-		os.Exit(1)
+		err := errors.New("No targets specified, cannot continue!")
+		return err
 	}
 
 	return nil
@@ -135,92 +125,106 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 	var seq_no = 0
 
-	c4 := &icmp.PacketConn{}
-	c6 := &icmp.PacketConn{}
-	if p.useIPv4 {
-		c4, _ = icmp.ListenPacket(p.ipv4network, "0.0.0.0")
+	createConn := func(n string, a string) *icmp.PacketConn {
+		c, err := icmp.ListenPacket(n, a)
+		if err != nil {
+			logp.Err("Error creating connection: %v", err)
+			return nil
+		} else {
+			return c
+		}
 	}
-	if p.useIPv6 {
-		c6, _ = icmp.ListenPacket(p.ipv4network, "::")
+
+	c4 := &icmp.PacketConn{}
+	if p.useIPv4 {
+		c4 = createConn(p.ipv4network, "0.0.0.0")
 	}
 	defer c4.Close()
+
+	c6 := &icmp.PacketConn{}
+	if p.useIPv6 {
+		c6 = createConn(p.ipv6network, "::")
+	}
 	defer c6.Close()
 
 	for {
+		batch := pool.Batch()
 		select {
 		case <-p.done:
-			pool.Cancel()
+			ticker.Stop()
+			pool.Close()
 			return nil
 		case <-ticker.C:
-		}
 
-		batch := pool.Batch()
-		if p.useIPv4 {
-			go func() {
-				for addr, details := range p.ipv4targets {
-					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-					req := PingRequest{}
-					req.Encode(seq_no, ipv4.ICMPTypeEcho, addr)
-					seq_no++
-					// reset sequence no if we go above a 32-bit value
-					if seq_no > 65535 {
-						seq_no = 0
+			if p.useIPv4 {
+				go func() {
+					for addr, details := range p.ipv4targets {
+						logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+						req := &PingRequest{}
+						req.Encode(seq_no, ipv4.ICMPTypeEcho, addr)
+						seq_no++
+						// reset sequence no if we go above a 32-bit value
+						if seq_no > 65535 {
+							seq_no = 0
+						}
+						batch.Queue(PingTarget(req, c4, p.ipv4network, p.period))
 					}
-					batch.Queue(PingTarget(&req, c4, p.ipv4network, p.period))
-				}
-				batch.QueueComplete()
-			}()
-		}
-		if p.useIPv6 {
-			go func() {
-				for addr, details := range p.ipv6targets {
-					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-					req := PingRequest{}
-					req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr)
-					seq_no++
-					// reset sequence no if we go above a 32-bit value
-					if seq_no > 65535 {
-						seq_no = 0
+					batch.QueueComplete()
+				}()
+			}
+			if p.useIPv6 {
+				go func() {
+					for addr, details := range p.ipv6targets {
+						logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+						req := &PingRequest{}
+						req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr)
+						seq_no++
+						// reset sequence no if we go above a 32-bit value
+						if seq_no > 65535 {
+							seq_no = 0
+						}
+						batch.Queue(PingTarget(req, c6, p.ipv6network, p.period))
 					}
-					batch.Queue(PingTarget(&req, c6, p.ipv6network, p.period))
-				}
-				batch.QueueComplete()
-			}()
-		}
-		for result := range batch.Results() {
-			if err := result.Error(); err != nil {
-				// If we get an error, treat it as loss
-				// At some point we might try to distinguish
-				// different errors
-				logp.Warn("%v", err)
-				target := result.Value().(PingReply).target
+					batch.QueueComplete()
+				}()
+			}
+			for result := range batch.Results() {
+				if err := result.Error(); err != nil {
+					// If we get an error, treat it as loss
+					// At some point we might try to distinguish
+					// different errors
+					logp.Err("Ping unsuccessful: %v", err)
+					// result.Cancel()
+					if result != nil {
+						target := result.Value().(*PingReply).target
+						name, tag := p.FetchDetails(target)
+						event := common.MapStr{
+							"@timestamp":  common.Time(time.Now()),
+							"type":        "pingbeat",
+							"target_name": name,
+							"target_addr": target,
+							"tag":         tag,
+							"loss":        true,
+						}
+						p.events.PublishEvent(event)
+					}
+				} else {
+					// Success, record the target and the rtt
+					target := result.Value().(*PingReply).target
+					rtt := result.Value().(*PingReply).rtt
 
-				name, tag := p.FetchDetails(target)
-				event := common.MapStr{
-					"@timestamp":  common.Time(time.Now()),
-					"type":        "pingbeat",
-					"target_name": name,
-					"target_addr": target,
-					"tag":         tag,
-					"loss":        true,
-				}
-				p.events.PublishEvent(event)
-			} else {
-				// Success, record the target and the rtt
-				target := result.Value().(PingReply).target
-				rtt := result.Value().(PingReply).rtt
+					name, tag := p.FetchDetails(target)
 
-				name, tag := p.FetchDetails(target)
-
-				event := common.MapStr{
-					"@timestamp":  common.Time(time.Now()),
-					"type":        "pingbeat",
-					"target_name": name,
-					"target_addr": target,
-					"tag":         tag,
-					"rtt":         milliSeconds(rtt),
+					event := common.MapStr{
+						"@timestamp":  common.Time(time.Now()),
+						"type":        "pingbeat",
+						"target_name": name,
+						"target_addr": target,
+						"tag":         tag,
+						"rtt":         milliSeconds(rtt),
+					}
+					p.events.PublishEvent(event)
 				}
-				p.events.PublishEvent(event)
 			}
 		}
 	}
@@ -244,7 +248,6 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 			p.ipv6targets[addr.String()] = [2]string{target, tag}
 		}
 	} else {
-		logp.Debug("pingbeat", "Getting IP addresses for %s:\n", target)
 		ip4addr := make(chan string)
 		ip6addr := make(chan string)
 		go FetchIPs(ip4addr, ip6addr, target)
@@ -255,14 +258,14 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 				if ip == "done" {
 					break lookup
 				} else if p.useIPv4 {
-					logp.Debug("pingbeat", "IPv4: %s\n", ip)
+					logp.Debug("pingbeat", "Target %s has an IPv4 address %s\n", target, ip)
 					p.ipv4targets[ip] = [2]string{target, tag}
 				}
 			case ip := <-ip6addr:
 				if ip == "done" {
 					break lookup
 				} else if p.useIPv6 {
-					logp.Debug("pingbeat", "IPv6: %s\n", ip)
+					logp.Debug("pingbeat", "Target %s has an IPv6 address %s\n", target, ip)
 					p.ipv6targets[ip] = [2]string{target, tag}
 				}
 			}
@@ -323,9 +326,9 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 // and will return the reply packet or an error
 func PingTarget(req *PingRequest, c *icmp.PacketConn, network string, timeout time.Duration) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
-		rep := PingReply{}
+		rep := &PingReply{}
 		rep.binary_payload = make([]byte, 1500)
-		rep.target = req.target
+		rep.ping_type = req.ping_type
 		target2netAddr := func(t string, n string) net.Addr {
 			if network[:2] == "ip" {
 				return &net.IPAddr{IP: net.ParseIP(t)}
@@ -334,29 +337,25 @@ func PingTarget(req *PingRequest, c *icmp.PacketConn, network string, timeout ti
 			}
 		}
 		target := target2netAddr(req.target, network)
+		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			logp.Err("PingTarget: %v", err)
+			return rep, err
+		}
 		begin := time.Now()
 		if _, err := c.WriteTo(req.binary_payload, target); err != nil {
-			logp.Warn("PingTarget: %v", err)
+			logp.Err("PingTarget: %v", err)
 			return rep, err
 		}
-		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			logp.Warn("PingTarget: %v", err)
-			return rep, err
-		}
-		n, _, err := c.ReadFrom(rep.binary_payload)
+		n, peer, err := c.ReadFrom(rep.binary_payload)
 		if err != nil {
-			logp.Warn("PingTarget: %v", err)
+			logp.Err("PingTarget: %v", err)
+			rep.target = req.target
 			return rep, err
 		}
+		rep.target = peer.String()
 		rep.rtt = time.Since(begin)
-		rep.ping_type = req.ping_type
 		rep.Decode(n)
-		// if rep.text_payload.Body != req.text_payload.Body {
-		// 	err := errors.New("sequence number mismatch")
-		// 	return rep, err
-		// }
 		if wu.IsCancelled() {
-			// return values not used
 			return nil, nil
 		}
 		return rep, nil
