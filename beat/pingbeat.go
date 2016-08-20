@@ -26,7 +26,8 @@ type Pingbeat struct {
 	useIPv6     bool
 	period      time.Duration
 	timeout     time.Duration
-	pingType    string
+	ipv4network string
+	ipv6network string
 	iface       string
 	ipv4targets map[string][2]string
 	ipv6targets map[string][2]string
@@ -54,11 +55,11 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		duration, err := time.ParseDuration(*p.config.Input.Period)
 		p.period = duration
 		if duration < time.Second || err != nil {
-			logp.Warn("pingbeat", "Error parsing duration or duration too small. Setting to default 10s")
+			logp.Warn("Config: Error parsing duration or duration too small: %v. Setting to default 10s", duration)
 			p.period = 10 * time.Second
 		}
 	} else {
-		logp.Warn("pingbeat", "No period set. Setting to default 10s")
+		logp.Warn("Config: No period set. Setting to default 10s")
 		p.period = 10 * time.Second
 	}
 	logp.Debug("pingbeat", "Period %v\n", p.period)
@@ -74,11 +75,18 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	// Check if we can use privileged (i.e. raw socket) ping,
 	// else use a UDP ping
 	if *p.config.Input.Privileged {
-		p.pingType = "ip"
+		if os.Getuid() != 0 {
+			logp.Critical("Error: Privileged set but not running with privleges!")
+			os.Exit(1)
+		}
+		p.ipv4network = "ip4:icmp"
+		p.ipv6network = "ip6:ipv6-icmp"
 	} else {
-		p.pingType = "udp"
+		p.ipv4network = "udp4"
+		p.ipv6network = "udp6"
+
 	}
-	logp.Debug("pingbeat", "Using %v for pings\n", p.pingType)
+	logp.Debug("pingbeat", "Using %v and/or %v for pings\n", p.ipv4network, p.ipv6network)
 
 	// Check whether IPv4/IPv6 pings are requested in config
 	// Default to just IPv4 pings
@@ -92,7 +100,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	} else {
 		p.useIPv6 = false
 	}
-	logp.Debug("pingbeat", "IPv4: %v, IPv6: %v\n", p.useIPv4, p.useIPv6)
+	logp.Debug("pingbeat", "Use IPv4? %v, Use IPv6? %v\n", p.useIPv4, p.useIPv6)
 
 	// Fill the IPv4/IPv6 targets maps
 	p.ipv4targets = make(map[string][2]string)
@@ -127,11 +135,16 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 	var seq_no = 0
 
-	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		logp.Critical("Error: Could not create connection: %v", err)
+	c4 := &icmp.PacketConn{}
+	c6 := &icmp.PacketConn{}
+	if p.useIPv4 {
+		c4, _ = icmp.ListenPacket(p.ipv4network, "0.0.0.0")
 	}
-	defer c.Close()
+	if p.useIPv6 {
+		c6, _ = icmp.ListenPacket(p.ipv4network, "::")
+	}
+	defer c4.Close()
+	defer c6.Close()
 
 	for {
 		select {
@@ -147,9 +160,13 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				for addr, details := range p.ipv4targets {
 					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 					req := PingRequest{}
-					req.Encode(seq_no, ipv4.ICMPTypeEcho, addr, p.iface)
+					req.Encode(seq_no, ipv4.ICMPTypeEcho, addr)
 					seq_no++
-					batch.Queue(PingTarget(&req, c, p.period))
+					// reset sequence no if we go above a 32-bit value
+					if seq_no > 65535 {
+						seq_no = 0
+					}
+					batch.Queue(PingTarget(&req, c4, p.ipv4network, p.period))
 				}
 				batch.QueueComplete()
 			}()
@@ -159,15 +176,23 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				for addr, details := range p.ipv6targets {
 					logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
 					req := PingRequest{}
-					req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr, p.iface)
+					req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr)
 					seq_no++
-					batch.Queue(PingTarget(&req, c, p.period))
+					// reset sequence no if we go above a 32-bit value
+					if seq_no > 65535 {
+						seq_no = 0
+					}
+					batch.Queue(PingTarget(&req, c6, p.ipv6network, p.period))
 				}
 				batch.QueueComplete()
 			}()
 		}
 		for result := range batch.Results() {
 			if err := result.Error(); err != nil {
+				// If we get an error, treat it as loss
+				// At some point we might try to distinguish
+				// different errors
+				logp.Warn("%v", err)
 				target := result.Value().(PingReply).target
 
 				name, tag := p.FetchDetails(target)
@@ -181,6 +206,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				}
 				p.events.PublishEvent(event)
 			} else {
+				// Success, record the target and the rtt
 				target := result.Value().(PingReply).target
 				rtt := result.Value().(PingReply).rtt
 
@@ -244,7 +270,7 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 	}
 }
 
-// Addr2Name takes a net.IPAddr and returns the name and tag
+// Addr2Name takes a address as a string and returns the name and tag
 // associated with that address in the Pingbeat struct
 func (p *Pingbeat) FetchDetails(addr string) (string, string) {
 	var name, tag string
@@ -292,28 +318,38 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
-func PingTarget(req *PingRequest, c *icmp.PacketConn, timeout time.Duration) pool.WorkFunc {
+// PingTarget is the workhorse function that sends a encoded ICMP packet to a target
+// and decodes the response.  It takes in the packet, the connection and a timeout duration
+// and will return the reply packet or an error
+func PingTarget(req *PingRequest, c *icmp.PacketConn, network string, timeout time.Duration) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		rep := PingReply{}
 		rep.binary_payload = make([]byte, 1500)
-		rep.target = req.target.IP.String()
+		rep.target = req.target
+		target2netAddr := func(t string, n string) net.Addr {
+			if network[:2] == "ip" {
+				return &net.IPAddr{IP: net.ParseIP(t)}
+			} else {
+				return &net.UDPAddr{IP: net.ParseIP(t)}
+			}
+		}
+		target := target2netAddr(req.target, network)
 		begin := time.Now()
-		if _, err := c.WriteTo(req.binary_payload, req.target); err != nil {
-			logp.Warn("pingbeat", "PingTarget: %v", err)
+		if _, err := c.WriteTo(req.binary_payload, target); err != nil {
+			logp.Warn("PingTarget: %v", err)
 			return rep, err
 		}
 		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			logp.Warn("pingbeat", "PingTarget: %v", err)
+			logp.Warn("PingTarget: %v", err)
 			return rep, err
 		}
-		n, peer, err := c.ReadFrom(rep.binary_payload)
+		n, _, err := c.ReadFrom(rep.binary_payload)
 		if err != nil {
-			logp.Warn("pingbeat", "PingTarget: %v", err)
+			logp.Warn("PingTarget: %v", err)
 			return rep, err
 		}
 		rep.rtt = time.Since(begin)
 		rep.ping_type = req.ping_type
-		rep.target = peer.String()
 		rep.Decode(n)
 		// if rep.text_payload.Body != req.text_payload.Body {
 		// 	err := errors.New("sequence number mismatch")
