@@ -2,6 +2,7 @@ package pingbeat
 
 import (
 	"errors"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -157,37 +158,12 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		case <-ticker.C:
 
 			if p.useIPv4 {
-				go func() {
-					for addr, details := range p.ipv4targets {
-						logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-						req := &PingRequest{}
-						req.Encode(seq_no, ipv4.ICMPTypeEcho, addr)
-						seq_no++
-						// reset sequence no if we go above a 32-bit value
-						if seq_no > 65535 {
-							seq_no = 0
-						}
-						batch.Queue(PingTarget(req, c4, p.ipv4network, p.period))
-					}
-					batch.QueueComplete()
-				}()
+				go p.QueueTargets(ipv4.ICMPTypeEcho, seq_no, c4, batch)
 			}
 			if p.useIPv6 {
-				go func() {
-					for addr, details := range p.ipv6targets {
-						logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
-						req := &PingRequest{}
-						req.Encode(seq_no, ipv6.ICMPTypeEchoRequest, addr)
-						seq_no++
-						// reset sequence no if we go above a 32-bit value
-						if seq_no > 65535 {
-							seq_no = 0
-						}
-						batch.Queue(PingTarget(req, c6, p.ipv6network, p.period))
-					}
-					batch.QueueComplete()
-				}()
+				go p.QueueTargets(ipv6.ICMPTypeEchoRequest, seq_no, c6, batch)
 			}
+
 			for result := range batch.Results() {
 				if err := result.Error(); err != nil {
 					// If we get an error, treat it as loss
@@ -321,6 +297,34 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
+func (p *Pingbeat) QueueTargets(ping_type icmp.Type, seq_no int, conn *icmp.PacketConn, batch pool.Batch) {
+	var network string
+	targets := make(map[string][2]string)
+	spew.Dump(ping_type)
+	switch ping_type {
+	case ipv4.ICMPTypeEcho:
+		targets = p.ipv4targets
+		network = p.ipv4network
+	case ipv6.ICMPTypeEchoRequest:
+		targets = p.ipv4targets
+		network = p.ipv4network
+	default:
+		logp.Err("QueueTargets: Invalid ICMP message type")
+	}
+	for addr, details := range targets {
+		logp.Debug("pingbeat", "Adding target IP: %s, Name: %s, Tag: %s\n", addr, details[0], details[1])
+		req := &PingRequest{}
+		req.Encode(seq_no, ping_type, addr)
+		seq_no++
+		// reset sequence no if we go above a 32-bit value
+		if seq_no > 65535 {
+			seq_no = 0
+		}
+		batch.Queue(PingTarget(req, conn, network, p.period))
+	}
+	batch.QueueComplete()
+}
+
 // PingTarget is the workhorse function that sends a encoded ICMP packet to a target
 // and decodes the response.  It takes in the packet, the connection and a timeout duration
 // and will return the reply packet or an error
@@ -357,6 +361,32 @@ func PingTarget(req *PingRequest, c *icmp.PacketConn, network string, timeout ti
 		rep.Decode(n)
 		if wu.IsCancelled() {
 			return nil, nil
+		}
+		return rep, nil
+	}
+}
+
+func SendPing(req *PingRequest, c *icmp.PacketConn, network string, timeout time.Duration) pool.WorkFunc {
+	return func(wu pool.WorkUnit) (interface{}, error) {
+		rep := &PingReply{}
+		rep.binary_payload = make([]byte, 1500)
+		rep.ping_type = req.ping_type
+		target2netAddr := func(t string, n string) net.Addr {
+			if network[:2] == "ip" {
+				return &net.IPAddr{IP: net.ParseIP(t)}
+			} else {
+				return &net.UDPAddr{IP: net.ParseIP(t)}
+			}
+		}
+		target := target2netAddr(req.target, network)
+		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			logp.Err("PingTarget: %v", err)
+			return rep, err
+		}
+		rep.start_time = time.Now()
+		if _, err := c.WriteTo(req.binary_payload, target); err != nil {
+			logp.Err("PingTarget: %v", err)
+			return rep, err
 		}
 		return rep, nil
 	}

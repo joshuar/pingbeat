@@ -11,6 +11,7 @@ type PingReply struct {
 	binary_payload []byte
 	ping_type      icmp.Type
 	target         string
+	start_time     time.Time
 	rtt            time.Duration
 }
 
