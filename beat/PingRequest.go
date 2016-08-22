@@ -4,6 +4,7 @@ import (
 	"github.com/elastic/beats/libbeat/logp"
 	"golang.org/x/net/icmp"
 	"os"
+	"time"
 )
 
 type PingRequest struct {
@@ -11,6 +12,7 @@ type PingRequest struct {
 	binary_payload []byte
 	ping_type      icmp.Type
 	target         string
+	start_time     time.Time
 }
 
 func (request *PingRequest) Encode(seq_no int, ping_type icmp.Type, target string) {

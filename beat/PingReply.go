@@ -3,7 +3,6 @@ package pingbeat
 import (
 	"github.com/elastic/beats/libbeat/logp"
 	"golang.org/x/net/icmp"
-	"time"
 )
 
 type PingReply struct {
@@ -11,8 +10,6 @@ type PingReply struct {
 	binary_payload []byte
 	ping_type      icmp.Type
 	target         string
-	start_time     time.Time
-	rtt            time.Duration
 }
 
 func (reply *PingReply) Decode(n int) {
