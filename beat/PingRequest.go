@@ -1,8 +1,8 @@
 package pingbeat
 
 import (
-	"github.com/elastic/beats/libbeat/logp"
 	"golang.org/x/net/icmp"
+	"net"
 	"os"
 	"time"
 )
@@ -12,24 +12,37 @@ type PingRequest struct {
 	binary_payload []byte
 	ping_type      icmp.Type
 	target         string
+	addr           net.Addr
 	start_time     time.Time
 }
 
-func (request *PingRequest) Encode(seq_no int, ping_type icmp.Type, target string) {
-	request.target = target
-	request.ping_type = ping_type
-	request.text_payload = &icmp.Message{
-		Type: request.ping_type, Code: 0,
+func NewPingRequest(seq_no int, ping_type icmp.Type, target string, network string) (*PingRequest, error) {
+	pr := &PingRequest{}
+	pr.target = target
+	pr.addr = pr.toAddr(target, network)
+	pr.ping_type = ping_type
+	pr.text_payload = &icmp.Message{
+		Type: pr.ping_type, Code: 0,
 		Body: &icmp.Echo{
 			ID:   os.Getpid() & 0xffff,
 			Seq:  seq_no,
 			Data: []byte("pingbeat: y'know, for pings"),
 		},
 	}
-	binary, err := request.text_payload.Marshal(nil)
+	binary, err := pr.text_payload.Marshal(nil)
 	if err != nil {
-		logp.Err("Error encoding packet: %v", err)
+		return nil, err
 	} else {
-		request.binary_payload = binary
+		pr.binary_payload = binary
+	}
+	pr.start_time = time.Now().UTC()
+	return pr, nil
+}
+
+func (pr *PingRequest) toAddr(t string, n string) net.Addr {
+	if n[:2] == "ip" {
+		return &net.IPAddr{IP: net.ParseIP(t)}
+	} else {
+		return &net.UDPAddr{IP: net.ParseIP(t)}
 	}
 }

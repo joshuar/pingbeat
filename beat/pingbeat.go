@@ -184,7 +184,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					if err := result.Error(); err != nil {
 						logp.Err("Send unsuccessful: %v", err)
 					} else {
-						request := result.Value().(PingRequest)
+						request := result.Value().(*PingRequest)
 
 						seq_no := request.text_payload.Body.(*icmp.Echo).Seq
 						target := request.target
@@ -211,7 +211,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				if err := result.Error(); err != nil {
 					logp.Err("Recv unsuccessful: %v", err)
 				} else {
-					reply := result.Value().(PingReply)
+					reply := result.Value().(*PingReply)
 					switch reply.text_payload.Body.(type) {
 					case *icmp.TimeExceeded:
 						logp.Err("time exceeded")
@@ -220,7 +220,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					case *icmp.DstUnreach:
 						logp.Err("unreachable")
 					case *icmp.Echo:
-						go p.ParsePacket(&pings, &reply)
+						go p.ParsePacket(&pings, reply)
 					default:
 						logp.Err("Unknown packet response")
 					}
@@ -367,21 +367,14 @@ func (p *Pingbeat) ParsePacket(state *PingState, packet *PingReply) {
 
 func SendPing(ping_type icmp.Type, seq_no int, addr string, c *icmp.PacketConn, network string) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
-		req := PingRequest{}
-		req.Encode(seq_no, ping_type, addr)
-		target2netAddr := func(t string, n string) net.Addr {
-			if network[:2] == "ip" {
-				return &net.IPAddr{IP: net.ParseIP(t)}
-			} else {
-				return &net.UDPAddr{IP: net.ParseIP(t)}
-			}
-		}
-		target := target2netAddr(req.target, network)
-		req.start_time = time.Now().UTC()
-		if _, err := c.WriteTo(req.binary_payload, target); err != nil {
+		req, err := NewPingRequest(seq_no, ping_type, addr, network)
+		if err != nil {
 			return nil, err
 		}
-		if err := c.SetReadDeadline(time.Now().Add(5000 * time.Millisecond)); err != nil {
+		if _, err := c.WriteTo(req.binary_payload, req.addr); err != nil {
+			return nil, err
+		}
+		if err := c.SetReadDeadline(req.start_time.Add(5000 * time.Millisecond)); err != nil {
 			return nil, err
 		}
 		if wu.IsCancelled() {
@@ -394,20 +387,25 @@ func SendPing(ping_type icmp.Type, seq_no int, addr string, c *icmp.PacketConn, 
 
 func RecvPing(c *icmp.PacketConn) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
-		rep := PingReply{}
-		if err := c.IPv4PacketConn(); err != nil {
-			rep.ping_type = ipv4.ICMPTypeEcho
+		var ping_type icmp.Type
+		switch {
+		case c.IPv4PacketConn() != nil:
+			ping_type = ipv4.ICMPTypeEcho
+		case c.IPv4PacketConn() != nil:
+			ping_type = ipv6.ICMPTypeEchoRequest
+		default:
+			err := errors.New("RecvPing: Unknown connection type")
+			return nil, err
 		}
-		if err := c.IPv6PacketConn(); err != nil {
-			rep.ping_type = ipv6.ICMPTypeEchoRequest
-		}
-		rep.binary_payload = make([]byte, 1500)
-		n, peer, err := c.ReadFrom(rep.binary_payload)
+		bytes := make([]byte, 1500)
+		n, peer, err := c.ReadFrom(bytes)
 		if err != nil {
 			return nil, err
 		}
-		rep.target = peer.String()
-		rep.Decode(n)
+		rep, err := NewPingReply(n, peer.String(), bytes, ping_type)
+		if err != nil {
+			return nil, err
+		}
 		if wu.IsCancelled() {
 			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
 			return nil, nil

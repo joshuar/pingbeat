@@ -1,7 +1,6 @@
 package pingbeat
 
 import (
-	"github.com/elastic/beats/libbeat/logp"
 	"golang.org/x/net/icmp"
 )
 
@@ -12,11 +11,16 @@ type PingReply struct {
 	target         string
 }
 
-func (reply *PingReply) Decode(n int) {
-	rm, err := icmp.ParseMessage(reply.ping_type.Protocol(), reply.binary_payload[:n])
+func NewPingReply(n int, p string, b []byte, t icmp.Type) (*PingReply, error) {
+	pr := &PingReply{}
+	pr.target = p
+	pr.ping_type = t
+	pr.binary_payload = b
+	rm, err := icmp.ParseMessage(pr.ping_type.Protocol(), pr.binary_payload[:n])
 	if err != nil {
-		logp.Err("Error decoding packet: %v", err)
+		return nil, err
 	} else {
-		reply.text_payload = rm
+		pr.text_payload = rm
 	}
+	return pr, nil
 }
