@@ -130,8 +130,10 @@ func (p *Pingbeat) Setup(b *beat.Beat) error {
 }
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
-	pool := pool.New()
-	defer pool.Close()
+	spool := pool.New()
+	defer spool.Close()
+	rpool := pool.New()
+	defer rpool.Close()
 
 	ticker := time.NewTicker(p.period)
 	defer ticker.Stop()
@@ -161,12 +163,13 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	defer c6.Close()
 
 	for {
-		sendBatch := pool.Batch()
-		recvBatch := pool.Batch()
+		sendBatch := spool.Batch()
+		recvBatch := rpool.Batch()
 		select {
 		case <-p.done:
 			ticker.Stop()
-			pool.Close()
+			spool.Close()
+			rpool.Close()
 			return nil
 		case <-ticker.C:
 			pings := PingState{}
