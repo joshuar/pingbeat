@@ -167,7 +167,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 	for {
 		sendBatch := spool.Batch()
-		recvBatch := rpool.Batch()
 		select {
 		case <-p.done:
 			ticker.Stop()
@@ -184,6 +183,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			}
 
 			go func() {
+				var r pool.WorkUnit
 				for result := range sendBatch.Results() {
 					if err := result.Error(); err != nil {
 						logp.Err("Send unsuccessful: %v", err)
@@ -192,39 +192,36 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 						switch request.ping_type {
 						case ipv4.ICMPTypeEcho:
-							recvBatch.Queue(RecvPing(c4))
+							r = rpool.Queue(RecvPing(c4))
 						case ipv6.ICMPTypeEchoRequest:
-							recvBatch.Queue(RecvPing(c6))
+							r = rpool.Queue(RecvPing(c6))
 						default:
 							logp.Err("Invalid ICMP message type")
 						}
+						r.Wait()
+						if err := r.Error(); err != nil {
+							logp.Err("Recv unsuccessful: %v", err)
+						} else {
+							reply := r.Value().(*PingReply)
+
+							switch reply.text_payload.Body.(type) {
+							case *icmp.TimeExceeded:
+								logp.Err("time exceeded")
+							case *icmp.PacketTooBig:
+								logp.Err("packet too big")
+							case *icmp.DstUnreach:
+								logp.Err("unreachable")
+							case *icmp.Echo:
+								seq_no := reply.text_payload.Body.(*icmp.Echo).Seq
+								target := reply.target
+								go p.ProcessReplies(&pings, seq_no, target)
+							default:
+								logp.Err("Unknown packet response")
+							}
+						}
 					}
 				}
-				recvBatch.QueueComplete()
 			}()
-
-			for result := range recvBatch.Results() {
-				if err := result.Error(); err != nil {
-					logp.Err("Recv unsuccessful: %v", err)
-				} else {
-					reply := result.Value().(*PingReply)
-
-					switch reply.text_payload.Body.(type) {
-					case *icmp.TimeExceeded:
-						logp.Err("time exceeded")
-					case *icmp.PacketTooBig:
-						logp.Err("packet too big")
-					case *icmp.DstUnreach:
-						logp.Err("unreachable")
-					case *icmp.Echo:
-						seq_no := reply.text_payload.Body.(*icmp.Echo).Seq
-						target := reply.target
-						go p.ProcessReplies(&pings, seq_no, target)
-					default:
-						logp.Err("Unknown packet response")
-					}
-				}
-			}
 		}
 	}
 }
