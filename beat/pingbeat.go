@@ -162,6 +162,9 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	}
 	defer c6.Close()
 
+	pings := PingState{}
+	pings.p = make(map[int]Ping)
+
 	for {
 		sendBatch := spool.Batch()
 		recvBatch := rpool.Batch()
@@ -172,14 +175,12 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			rpool.Close()
 			return nil
 		case <-ticker.C:
-			pings := PingState{}
-			pings.p = make(map[int]Ping)
 
 			if p.useIPv4 {
-				go p.QueueRequests(ipv4.ICMPTypeEcho, &seq_no, c4, sendBatch)
+				go p.QueueRequests(&pings, ipv4.ICMPTypeEcho, &seq_no, c4, sendBatch)
 			}
 			if p.useIPv6 {
-				go p.QueueRequests(ipv6.ICMPTypeEchoRequest, &seq_no, c6, sendBatch)
+				go p.QueueRequests(&pings, ipv6.ICMPTypeEchoRequest, &seq_no, c6, sendBatch)
 			}
 
 			go func() {
@@ -189,13 +190,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					} else {
 						request := result.Value().(*PingRequest)
 
-						seq_no := request.text_payload.Body.(*icmp.Echo).Seq
-						target := request.target
-						start := request.start_time
-						pings.mu.Lock()
-						pings.p[seq_no] = Ping{target: target, start_time: start}
-						pings.mu.Unlock()
-
 						switch request.ping_type {
 						case ipv4.ICMPTypeEcho:
 							recvBatch.Queue(RecvPing(c4))
@@ -204,7 +198,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 						default:
 							logp.Err("Invalid ICMP message type")
 						}
-
 					}
 				}
 				recvBatch.QueueComplete()
@@ -215,6 +208,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					logp.Err("Recv unsuccessful: %v", err)
 				} else {
 					reply := result.Value().(*PingReply)
+
 					switch reply.text_payload.Body.(type) {
 					case *icmp.TimeExceeded:
 						logp.Err("time exceeded")
@@ -223,7 +217,9 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					case *icmp.DstUnreach:
 						logp.Err("unreachable")
 					case *icmp.Echo:
-						go p.ParsePacket(&pings, reply)
+						seq_no := reply.text_payload.Body.(*icmp.Echo).Seq
+						target := reply.target
+						go p.ParsePacket(&pings, seq_no, target)
 					default:
 						logp.Err("Unknown packet response")
 					}
@@ -324,7 +320,7 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
-func (p *Pingbeat) QueueRequests(ping_type icmp.Type, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
+func (p *Pingbeat) QueueRequests(pings *PingState, ping_type icmp.Type, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
 	var network string
 	targets := make(map[string][2]string)
 	switch ping_type {
@@ -339,22 +335,27 @@ func (p *Pingbeat) QueueRequests(ping_type icmp.Type, seq_no *int, conn *icmp.Pa
 	}
 	for addr, _ := range targets {
 		batch.Queue(SendPing(ping_type, *seq_no, addr, conn, network))
+		pings.mu.Lock()
+		pings.p[*seq_no] = Ping{target: addr, start_time: time.Now().UTC()}
+		pings.mu.Unlock()
 		*seq_no++
 		// reset sequence no if we go above a 32-bit value
 		if *seq_no > 65535 {
+			logp.Debug("pingbeat", "Resetting sequence number")
 			*seq_no = 0
 		}
 	}
 	batch.QueueComplete()
 }
 
-func (p *Pingbeat) ParsePacket(state *PingState, packet *PingReply) {
-	seq_no := packet.text_payload.Body.(*icmp.Echo).Seq
-	target := packet.target
+func (p *Pingbeat) ParsePacket(state *PingState, seq_no int, target string) {
 	state.mu.Lock()
 	rtt := time.Since(state.p[seq_no].start_time)
 	delete(state.p, seq_no)
 	state.mu.Unlock()
+	if rtt > (5 * time.Second) {
+		logp.Info("No record of ICMP packet: %i", seq_no)
+	}
 	name, tag := p.FetchDetails(target)
 
 	event := common.MapStr{
