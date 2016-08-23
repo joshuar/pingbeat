@@ -219,7 +219,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					case *icmp.Echo:
 						seq_no := reply.text_payload.Body.(*icmp.Echo).Seq
 						target := reply.target
-						go p.ParsePacket(&pings, seq_no, target)
+						go p.ProcessReplies(&pings, seq_no, target)
 					default:
 						logp.Err("Unknown packet response")
 					}
@@ -348,7 +348,7 @@ func (p *Pingbeat) QueueRequests(pings *PingState, ping_type icmp.Type, seq_no *
 	batch.QueueComplete()
 }
 
-func (p *Pingbeat) ParsePacket(state *PingState, seq_no int, target string) {
+func (p *Pingbeat) ProcessReplies(state *PingState, seq_no int, target string) {
 	state.mu.Lock()
 	rtt := time.Since(state.p[seq_no].start_time)
 	delete(state.p, seq_no)
@@ -378,7 +378,7 @@ func SendPing(ping_type icmp.Type, seq_no int, addr string, c *icmp.PacketConn, 
 		if _, err := c.WriteTo(req.binary_payload, req.addr); err != nil {
 			return nil, err
 		}
-		if err := c.SetReadDeadline(req.start_time.Add(5000 * time.Millisecond)); err != nil {
+		if err := c.SetReadDeadline(time.Now().Add(5000 * time.Millisecond)); err != nil {
 			return nil, err
 		}
 		if wu.IsCancelled() {

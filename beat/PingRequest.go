@@ -4,7 +4,6 @@ import (
 	"golang.org/x/net/icmp"
 	"net"
 	"os"
-	"time"
 )
 
 type PingRequest struct {
@@ -13,7 +12,6 @@ type PingRequest struct {
 	ping_type      icmp.Type
 	target         string
 	addr           net.Addr
-	start_time     time.Time
 }
 
 func NewPingRequest(seq_no int, ping_type icmp.Type, target string, network string) (*PingRequest, error) {
@@ -35,7 +33,6 @@ func NewPingRequest(seq_no int, ping_type icmp.Type, target string, network stri
 	} else {
 		pr.binary_payload = binary
 	}
-	pr.start_time = time.Now().UTC()
 	return pr, nil
 }
 
