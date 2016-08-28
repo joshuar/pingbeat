@@ -181,43 +181,46 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				go p.QueueRequests(&pings, &seq_no, c6, sendBatch)
 			}
 
-			var r pool.WorkUnit
+			recvBatch := rpool.Batch()
 			for result := range sendBatch.Results() {
 				if err := result.Error(); err != nil {
 					logp.Err("Send unsuccessful: %v", err)
 				} else {
 					switch result.Value() {
 					case ipv4.ICMPTypeEcho:
-						r = rpool.Queue(RecvPing(c4))
+
+						recvBatch.Queue(RecvPing(c4))
 					case ipv6.ICMPTypeEchoRequest:
-						r = rpool.Queue(RecvPing(c6))
+						recvBatch.Queue(RecvPing(c6))
 					default:
 						logp.Err("Invalid ICMP message type")
 					}
-					r.Wait()
-					if err := r.Error(); err != nil {
-						logp.Err("Recv unsuccessful: %v", err)
-					} else {
-						reply := r.Value().(*PingReply)
-						switch reply.text_payload.Body.(type) {
-						case *icmp.TimeExceeded:
-							logp.Err("time exceeded")
-						case *icmp.PacketTooBig:
-							logp.Err("packet too big")
-						case *icmp.DstUnreach:
-							logp.Err("unreachable")
-							spew.Dump(reply)
-						case *icmp.Echo:
-							tgt := struct {
-								s int
-								t string
-							}{reply.text_payload.Body.(*icmp.Echo).Seq, reply.target}
-							go p.ProcessPing(&pings, &tgt)
-						default:
-							logp.Err("Unknown packet response")
-						}
+				}
+			}
+			recvBatch.QueueComplete()
+
+			for result := range recvBatch.Results() {
+				if err := result.Error(); err != nil {
+					logp.Err("Recv unsuccessful: %v", err)
+				} else {
+					reply := result.Value().(*PingReply)
+					switch reply.text_payload.Body.(type) {
+					case *icmp.TimeExceeded:
+						logp.Err("time exceeded")
+					case *icmp.PacketTooBig:
+						logp.Err("packet too big")
+					case *icmp.DstUnreach:
+						logp.Err("unreachable")
+						spew.Dump(reply)
+					case *icmp.Echo:
+						tgt := struct {
+							s int
+							t string
+						}{reply.text_payload.Body.(*icmp.Echo).Seq, reply.target}
+						go p.ProcessPing(&pings, &tgt)
+					default:
+						logp.Err("Unknown packet response")
 					}
-					r.Cancel()
 				}
 			}
 			go p.ProcessMissing(&pings)
@@ -343,16 +346,14 @@ func (p *Pingbeat) QueueRequests(pings *PingState, seq_no *int, conn *icmp.Packe
 		if err != nil {
 			logp.Err("QueueTargets: %v", err)
 		}
-		batch.Queue(SendPing(conn, p.period, req))
-		pings.mu.Lock()
-		pings.p[*seq_no] = Ping{target: addr, start_time: time.Now().UTC()}
-		pings.mu.Unlock()
+		batch.Queue(SendPing(conn, p.period, req, pings))
 		*seq_no++
 		// reset sequence no if we go above a 32-bit value
 		if *seq_no > 65535 {
 			logp.Debug("pingbeat", "Resetting sequence number")
 			*seq_no = 0
 		}
+
 	}
 	batch.QueueComplete()
 }
@@ -365,8 +366,8 @@ func (p *Pingbeat) ProcessPing(state *PingState, tgt *struct {
 	rtt := time.Since(state.p[tgt.s].start_time)
 	delete(state.p, tgt.s)
 	state.mu.Unlock()
-	if rtt > (5 * time.Second) {
-		logp.Info("No record of ICMP packet: %i", tgt.s)
+	if rtt > (p.period) {
+		logp.Info("No record of ICMP packet: %v (%v)", tgt.s, tgt.t)
 	}
 	name, tag := p.FetchDetails(tgt.t)
 
@@ -399,10 +400,14 @@ func (p *Pingbeat) ProcessMissing(state *PingState) {
 	}
 }
 
-func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest) pool.WorkFunc {
+func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest, st *PingState) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		if _, err := conn.WriteTo(req.binary_payload, req.addr); err != nil {
 			return nil, err
+		} else {
+			st.mu.Lock()
+			st.p[req.seq_no] = Ping{target: req.addr.String(), start_time: time.Now().UTC()}
+			st.mu.Unlock()
 		}
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return nil, err
