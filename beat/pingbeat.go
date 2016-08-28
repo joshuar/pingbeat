@@ -186,12 +186,15 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				if err := result.Error(); err != nil {
 					logp.Err("Send unsuccessful: %v", err)
 				} else {
+					rep, err := NewPingReply(result.Value().(icmp.Type))
+					if err != nil {
+						logp.Err("Unable to create PingReply: %v", err)
+					}
 					switch result.Value() {
 					case ipv4.ICMPTypeEcho:
-
-						recvBatch.Queue(RecvPing(c4))
+						recvBatch.Queue(RecvPing(c4, rep))
 					case ipv6.ICMPTypeEchoRequest:
-						recvBatch.Queue(RecvPing(c6))
+						recvBatch.Queue(RecvPing(c6, rep))
 					default:
 						logp.Err("Invalid ICMP message type")
 					}
@@ -420,32 +423,23 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest, st
 	}
 }
 
-func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
+func RecvPing(conn *icmp.PacketConn, rep *PingReply) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
-		var ping_type icmp.Type
-		switch {
-		case conn.IPv4PacketConn() != nil:
-			ping_type = ipv4.ICMPTypeEcho
-		case conn.IPv4PacketConn() != nil:
-			ping_type = ipv6.ICMPTypeEchoRequest
-		default:
-			err := errors.New("RecvPing: Unknown connection type")
-			return nil, err
-		}
-		bytes := make([]byte, 1500)
-		n, peer, err := conn.ReadFrom(bytes)
+		n, peer, err := conn.ReadFrom(rep.binary_payload)
 		if err != nil {
 			return nil, err
 		}
-		rep, err := NewPingReply(n, peer.String(), bytes, ping_type)
+		rep.target = peer.String()
+		rm, err := icmp.ParseMessage(rep.ping_type.Protocol(), rep.binary_payload[:n])
 		if err != nil {
 			return nil, err
+		} else {
+			rep.text_payload = rm
 		}
 		if wu.IsCancelled() {
 			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
 			return nil, nil
 		}
-		bytes = nil
 		return rep, nil
 	}
 }

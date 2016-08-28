@@ -11,16 +11,9 @@ type PingReply struct {
 	target         string
 }
 
-func NewPingReply(n int, p string, b []byte, t icmp.Type) (*PingReply, error) {
+func NewPingReply(t icmp.Type) (*PingReply, error) {
 	pr := &PingReply{}
-	pr.target = p
 	pr.ping_type = t
-	pr.binary_payload = b
-	rm, err := icmp.ParseMessage(pr.ping_type.Protocol(), pr.binary_payload[:n])
-	if err != nil {
-		return nil, err
-	} else {
-		pr.text_payload = rm
-	}
+	pr.binary_payload = make([]byte, 1500)
 	return pr, nil
 }
