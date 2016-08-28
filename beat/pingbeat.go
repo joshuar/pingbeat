@@ -2,7 +2,7 @@ package pingbeat
 
 import (
 	"errors"
-	// "github.com/davecgh/go-spew/spew"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -26,7 +26,6 @@ type Pingbeat struct {
 	useIPv4     bool
 	useIPv6     bool
 	period      time.Duration
-	timeout     time.Duration
 	ipv4network string
 	ipv6network string
 	ipv4targets map[string][2]string
@@ -61,12 +60,12 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		return err
 	}
 
-	// Use period provided in config or default to 5s
+	// Use period provided in config or default to 10s
 	if p.config.Input.Period != nil {
 		duration, err := time.ParseDuration(*p.config.Input.Period)
 		p.period = duration
 		if duration < time.Second || err != nil {
-			logp.Warn("Config: Error parsing duration or duration too small: %v. Setting to default 10s", duration)
+			logp.Warn("Config: Error parsing period or period too small: %v. Setting to default 10s", duration)
 			p.period = 10 * time.Second
 		}
 	} else {
@@ -166,7 +165,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	pings.p = make(map[int]Ping)
 
 	for {
-		sendBatch := spool.Batch()
 		select {
 		case <-p.done:
 			ticker.Stop()
@@ -174,54 +172,55 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			rpool.Close()
 			return nil
 		case <-ticker.C:
+			sendBatch := spool.Batch()
 
 			if p.useIPv4 {
-				go p.QueueRequests(&pings, ipv4.ICMPTypeEcho, &seq_no, c4, sendBatch)
+				go p.QueueRequests(&pings, &seq_no, c4, sendBatch)
 			}
 			if p.useIPv6 {
-				go p.QueueRequests(&pings, ipv6.ICMPTypeEchoRequest, &seq_no, c6, sendBatch)
+				go p.QueueRequests(&pings, &seq_no, c6, sendBatch)
 			}
 
-			go func() {
-				var r pool.WorkUnit
-				for result := range sendBatch.Results() {
-					if err := result.Error(); err != nil {
-						logp.Err("Send unsuccessful: %v", err)
+			var r pool.WorkUnit
+			for result := range sendBatch.Results() {
+				if err := result.Error(); err != nil {
+					logp.Err("Send unsuccessful: %v", err)
+				} else {
+					switch result.Value() {
+					case ipv4.ICMPTypeEcho:
+						r = rpool.Queue(RecvPing(c4))
+					case ipv6.ICMPTypeEchoRequest:
+						r = rpool.Queue(RecvPing(c6))
+					default:
+						logp.Err("Invalid ICMP message type")
+					}
+					r.Wait()
+					if err := r.Error(); err != nil {
+						logp.Err("Recv unsuccessful: %v", err)
 					} else {
-						switch result.Value() {
-						case ipv4.ICMPTypeEcho:
-							r = rpool.Queue(RecvPing(c4))
-						case ipv6.ICMPTypeEchoRequest:
-							r = rpool.Queue(RecvPing(c6))
+						reply := r.Value().(*PingReply)
+						switch reply.text_payload.Body.(type) {
+						case *icmp.TimeExceeded:
+							logp.Err("time exceeded")
+						case *icmp.PacketTooBig:
+							logp.Err("packet too big")
+						case *icmp.DstUnreach:
+							logp.Err("unreachable")
+							spew.Dump(reply)
+						case *icmp.Echo:
+							tgt := struct {
+								s int
+								t string
+							}{reply.text_payload.Body.(*icmp.Echo).Seq, reply.target}
+							go p.ProcessPing(&pings, &tgt)
 						default:
-							logp.Err("Invalid ICMP message type")
-						}
-						r.Wait()
-						if err := r.Error(); err != nil {
-							logp.Err("Recv unsuccessful: %v", err)
-						} else {
-							reply := r.Value().(*PingReply)
-
-							switch reply.text_payload.Body.(type) {
-							case *icmp.TimeExceeded:
-								logp.Err("time exceeded")
-							case *icmp.PacketTooBig:
-								logp.Err("packet too big")
-							case *icmp.DstUnreach:
-								logp.Err("unreachable")
-							case *icmp.Echo:
-								tgt := struct {
-									s int
-									t string
-								}{reply.text_payload.Body.(*icmp.Echo).Seq, reply.target}
-								go p.ProcessReplies(&pings, &tgt)
-							default:
-								logp.Err("Unknown packet response")
-							}
+							logp.Err("Unknown packet response")
 						}
 					}
+					r.Cancel()
 				}
-			}()
+			}
+			go p.ProcessMissing(&pings)
 		}
 	}
 }
@@ -317,16 +316,25 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
-func (p *Pingbeat) QueueRequests(pings *PingState, ping_type icmp.Type, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
+func (p *Pingbeat) QueueRequests(pings *PingState, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
 	var network string
+	var ping_type icmp.Type
+	switch {
+	case conn.IPv4PacketConn() != nil:
+		ping_type = ipv4.ICMPTypeEcho
+	case conn.IPv4PacketConn() != nil:
+		ping_type = ipv6.ICMPTypeEchoRequest
+	default:
+		logp.Err("QueueRequests: Unknown connection type")
+	}
 	targets := make(map[string][2]string)
 	switch ping_type {
 	case ipv4.ICMPTypeEcho:
 		targets = p.ipv4targets
 		network = p.ipv4network
 	case ipv6.ICMPTypeEchoRequest:
-		targets = p.ipv4targets
-		network = p.ipv4network
+		targets = p.ipv6targets
+		network = p.ipv6network
 	default:
 		logp.Err("QueueTargets: Invalid ICMP message type")
 	}
@@ -335,7 +343,7 @@ func (p *Pingbeat) QueueRequests(pings *PingState, ping_type icmp.Type, seq_no *
 		if err != nil {
 			logp.Err("QueueTargets: %v", err)
 		}
-		batch.Queue(SendPing(conn, req))
+		batch.Queue(SendPing(conn, p.period, req))
 		pings.mu.Lock()
 		pings.p[*seq_no] = Ping{target: addr, start_time: time.Now().UTC()}
 		pings.mu.Unlock()
@@ -349,7 +357,7 @@ func (p *Pingbeat) QueueRequests(pings *PingState, ping_type icmp.Type, seq_no *
 	batch.QueueComplete()
 }
 
-func (p *Pingbeat) ProcessReplies(state *PingState, tgt *struct {
+func (p *Pingbeat) ProcessPing(state *PingState, tgt *struct {
 	s int
 	t string
 }) {
@@ -373,12 +381,30 @@ func (p *Pingbeat) ProcessReplies(state *PingState, tgt *struct {
 	p.events.PublishEvent(event)
 }
 
-func SendPing(c *icmp.PacketConn, req *PingRequest) pool.WorkFunc {
+func (p *Pingbeat) ProcessMissing(state *PingState) {
+	for seq_no, info := range state.p {
+		name, tag := p.FetchDetails(info.target)
+		event := common.MapStr{
+			"@timestamp":  common.Time(time.Now().UTC()),
+			"type":        "pingbeat",
+			"target_name": name,
+			"target_addr": info.target,
+			"tag":         tag,
+			"loss":        true,
+		}
+		p.events.PublishEvent(event)
+		state.mu.Lock()
+		delete(state.p, seq_no)
+		state.mu.Unlock()
+	}
+}
+
+func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
-		if _, err := c.WriteTo(req.binary_payload, req.addr); err != nil {
+		if _, err := conn.WriteTo(req.binary_payload, req.addr); err != nil {
 			return nil, err
 		}
-		if err := c.SetReadDeadline(time.Now().Add(5000 * time.Millisecond)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return nil, err
 		}
 		if wu.IsCancelled() {
@@ -389,20 +415,20 @@ func SendPing(c *icmp.PacketConn, req *PingRequest) pool.WorkFunc {
 	}
 }
 
-func RecvPing(c *icmp.PacketConn) pool.WorkFunc {
+func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		var ping_type icmp.Type
 		switch {
-		case c.IPv4PacketConn() != nil:
+		case conn.IPv4PacketConn() != nil:
 			ping_type = ipv4.ICMPTypeEcho
-		case c.IPv4PacketConn() != nil:
+		case conn.IPv4PacketConn() != nil:
 			ping_type = ipv6.ICMPTypeEchoRequest
 		default:
 			err := errors.New("RecvPing: Unknown connection type")
 			return nil, err
 		}
 		bytes := make([]byte, 1500)
-		n, peer, err := c.ReadFrom(bytes)
+		n, peer, err := conn.ReadFrom(bytes)
 		if err != nil {
 			return nil, err
 		}
