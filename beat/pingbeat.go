@@ -2,7 +2,7 @@ package pingbeat
 
 import (
 	"errors"
-	"github.com/davecgh/go-spew/spew"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -35,15 +35,26 @@ type Pingbeat struct {
 	done        chan struct{}
 }
 
-type Ping struct {
+type PingRecord struct {
 	target     string
 	start_time time.Time
 	rtt        time.Duration
 }
 
+func (p *PingRecord) SetRTT() {
+	p.rtt = time.Since(p.start_time)
+}
+
+func NewPingRecord(target string) *PingRecord {
+	return &PingRecord{
+		target:     target,
+		start_time: time.Now().UTC(),
+	}
+}
+
 type PingState struct {
 	mu sync.RWMutex
-	p  map[int]Ping
+	p  map[int]*PingRecord
 }
 
 func New() *Pingbeat {
@@ -161,8 +172,8 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	}
 	defer c6.Close()
 
-	pings := PingState{}
-	pings.p = make(map[int]Ping)
+	state := &PingState{}
+	state.p = make(map[int]*PingRecord)
 
 	for {
 		select {
@@ -175,10 +186,10 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			sendBatch := spool.Batch()
 
 			if p.useIPv4 {
-				go p.QueueRequests(&pings, &seq_no, c4, sendBatch)
+				go p.QueueRequests(state, &seq_no, c4, sendBatch)
 			}
 			if p.useIPv6 {
-				go p.QueueRequests(&pings, &seq_no, c6, sendBatch)
+				go p.QueueRequests(state, &seq_no, c6, sendBatch)
 			}
 
 			recvBatch := rpool.Batch()
@@ -192,9 +203,9 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					}
 					switch result.Value() {
 					case ipv4.ICMPTypeEcho:
-						recvBatch.Queue(RecvPing(c4, rep))
+						recvBatch.Queue(RecvPing(c4, rep, state))
 					case ipv6.ICMPTypeEchoRequest:
-						recvBatch.Queue(RecvPing(c6, rep))
+						recvBatch.Queue(RecvPing(c6, rep, state))
 					default:
 						logp.Err("Invalid ICMP message type")
 					}
@@ -206,27 +217,10 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				if err := result.Error(); err != nil {
 					logp.Err("Recv unsuccessful: %v", err)
 				} else {
-					reply := result.Value().(*PingReply)
-					switch reply.text_payload.Body.(type) {
-					case *icmp.TimeExceeded:
-						logp.Err("time exceeded")
-					case *icmp.PacketTooBig:
-						logp.Err("packet too big")
-					case *icmp.DstUnreach:
-						logp.Err("unreachable")
-						spew.Dump(reply)
-					case *icmp.Echo:
-						tgt := struct {
-							s int
-							t string
-						}{reply.text_payload.Body.(*icmp.Echo).Seq, reply.target}
-						go p.ProcessPing(&pings, &tgt)
-					default:
-						logp.Err("Unknown packet response")
-					}
+					go p.ProcessPing(state, result.Value().(int))
 				}
 			}
-			go p.ProcessMissing(&pings)
+			// go p.ProcessMissing(state)
 		}
 	}
 }
@@ -322,7 +316,7 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
-func (p *Pingbeat) QueueRequests(pings *PingState, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
+func (p *Pingbeat) QueueRequests(state *PingState, seq_no *int, conn *icmp.PacketConn, batch pool.Batch) {
 	var network string
 	var ping_type icmp.Type
 	switch {
@@ -349,7 +343,7 @@ func (p *Pingbeat) QueueRequests(pings *PingState, seq_no *int, conn *icmp.Packe
 		if err != nil {
 			logp.Err("QueueTargets: %v", err)
 		}
-		batch.Queue(SendPing(conn, p.period, req, pings))
+		batch.Queue(SendPing(conn, p.period, req, state))
 		*seq_no++
 		// reset sequence no if we go above a 32-bit value
 		if *seq_no > 65535 {
@@ -361,24 +355,19 @@ func (p *Pingbeat) QueueRequests(pings *PingState, seq_no *int, conn *icmp.Packe
 	batch.QueueComplete()
 }
 
-func (p *Pingbeat) ProcessPing(state *PingState, tgt *struct {
-	s int
-	t string
-}) {
-	state.mu.Lock()
-	rtt := time.Since(state.p[tgt.s].start_time)
-	delete(state.p, tgt.s)
-	state.mu.Unlock()
-	if rtt > (p.period) {
-		logp.Info("No record of ICMP packet: %v (%v)", tgt.s, tgt.t)
-	}
-	name, tag := p.FetchDetails(tgt.t)
+func (p *Pingbeat) ProcessPing(state *PingState, seq_no int) {
+	state.mu.RLock()
+	target := state.p[seq_no].target
+	rtt := state.p[seq_no].rtt
+	state.mu.RUnlock()
+
+	name, tag := p.FetchDetails(target)
 
 	event := common.MapStr{
 		"@timestamp":  common.Time(time.Now().UTC()),
 		"type":        "pingbeat",
 		"target_name": name,
-		"target_addr": tgt.t,
+		"target_addr": target,
 		"tag":         tag,
 		"rtt":         milliSeconds(rtt),
 	}
@@ -405,26 +394,30 @@ func (p *Pingbeat) ProcessMissing(state *PingState) {
 
 func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest, st *PingState) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
+		if wu.IsCancelled() {
+			logp.Debug("pingbeat", "SendPing: workunit cancelled")
+			return nil, nil
+		}
 		if _, err := conn.WriteTo(req.binary_payload, req.addr); err != nil {
 			return nil, err
 		} else {
 			st.mu.Lock()
-			st.p[req.seq_no] = Ping{target: req.addr.String(), start_time: time.Now().UTC()}
+			st.p[req.seq_no] = NewPingRecord(req.addr.String())
 			st.mu.Unlock()
 		}
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return nil, err
 		}
-		if wu.IsCancelled() {
-			logp.Debug("pingbeat", "SendPing: workunit cancelled")
-			return nil, nil
-		}
 		return req.ping_type, nil
 	}
 }
 
-func RecvPing(conn *icmp.PacketConn, rep *PingReply) pool.WorkFunc {
+func RecvPing(conn *icmp.PacketConn, rep *PingReply, st *PingState) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
+		if wu.IsCancelled() {
+			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
+			return nil, nil
+		}
 		n, peer, err := conn.ReadFrom(rep.binary_payload)
 		if err != nil {
 			return nil, err
@@ -436,10 +429,26 @@ func RecvPing(conn *icmp.PacketConn, rep *PingReply) pool.WorkFunc {
 		} else {
 			rep.text_payload = rm
 		}
-		if wu.IsCancelled() {
-			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
-			return nil, nil
+		switch rep.text_payload.Body.(type) {
+		case *icmp.TimeExceeded:
+			err := errors.New("Time Exceeded")
+			return nil, err
+		case *icmp.PacketTooBig:
+			err := errors.New("Packet too big")
+			return nil, err
+		case *icmp.DstUnreach:
+			err := errors.New("Destination Unreachable")
+			return nil, err
+		case *icmp.Echo:
+			body := rep.text_payload.Body.(*icmp.Echo)
+			rep.seq_no = body.Seq
+			st.mu.Lock()
+			st.p[rep.seq_no].SetRTT()
+			st.mu.Unlock()
+			return rep.seq_no, nil
+		default:
+			err := errors.New("Unknown ICMP Packet")
+			return nil, err
 		}
-		return rep, nil
 	}
 }

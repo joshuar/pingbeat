@@ -9,6 +9,7 @@ type PingReply struct {
 	binary_payload []byte
 	ping_type      icmp.Type
 	target         string
+	seq_no         int
 }
 
 func NewPingReply(t icmp.Type) (*PingReply, error) {
