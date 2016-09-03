@@ -36,12 +36,11 @@ type Pingbeat struct {
 	done        chan struct{}
 }
 
-// type PingSent struct {
-// 	Seq    int
-// 	Target string
-// 	Type   icmp.Type
-// 	Sent   time.Time
-// }
+type PingSent struct {
+	Seq    int
+	Target net.Addr
+	Sent   time.Time
+}
 
 type PingRecv struct {
 	Seq        int
@@ -351,46 +350,45 @@ func (p *Pingbeat) ProcessMissing(state *PingState) {
 
 func (p *Pingbeat) QueueRequests(state *PingState, conn *icmp.PacketConn, batch pool.Batch) {
 	var network string
-	var ping_type icmp.Type
+	targets := make(map[string][2]string)
 	switch {
 	case conn.IPv4PacketConn() != nil:
-		ping_type = ipv4.ICMPTypeEcho
-	case conn.IPv4PacketConn() != nil:
-		ping_type = ipv6.ICMPTypeEchoRequest
-	default:
-		logp.Err("QueueRequests: Unknown connection type")
-	}
-	targets := make(map[string][2]string)
-	switch ping_type {
-	case ipv4.ICMPTypeEcho:
 		targets = p.ipv4targets
 		network = p.ipv4network
-	case ipv6.ICMPTypeEchoRequest:
+	case conn.IPv4PacketConn() != nil:
 		targets = p.ipv6targets
 		network = p.ipv6network
 	default:
-		logp.Err("QueueTargets: Invalid ICMP message type")
+		logp.Err("QueueRequests: Unknown connection type")
 	}
 	for addr, _ := range targets {
 		seq := state.GetSeqNo()
-		req, err := NewPingRequest(seq, ping_type, addr, network)
-		if err != nil {
-			logp.Err("QueueTargets: %v", err)
-		}
-		batch.Queue(SendPing(conn, p.period, req))
+		batch.Queue(SendPing(conn, p.period, seq, addr, network))
 		state.MU.Lock()
 		state.Pings[seq] = NewPingRecord(addr)
 		state.MU.Unlock()
 	}
 	batch.QueueComplete()
-
 }
 
-func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest) pool.WorkFunc {
+func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string, net string) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		if wu.IsCancelled() {
 			logp.Debug("pingbeat", "SendPing: workunit cancelled")
 			return nil, nil
+		}
+		var ping_type icmp.Type
+		switch {
+		case conn.IPv4PacketConn() != nil:
+			ping_type = ipv4.ICMPTypeEcho
+		case conn.IPv4PacketConn() != nil:
+			ping_type = ipv6.ICMPTypeEchoRequest
+		default:
+			logp.Err("QueueRequests: Unknown connection type")
+		}
+		req, err := NewPingRequest(seq, ping_type, addr, net)
+		if err != nil {
+			logp.Err("QueueTargets: %v", err)
 		}
 		if _, err := conn.WriteTo(req.binary_payload, req.addr); err != nil {
 			return nil, err
@@ -399,12 +397,6 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, req *PingRequest) po
 				return nil, err
 			}
 			return req.ping_type, nil
-			// ping := &PingSent{}
-			// ping.Seq = req.seq_no
-			// ping.Target = req.addr.String()
-			// ping.Type = req.ping_type
-			// ping.Sent = time.Now().UTC()
-			// return ping, nil
 		}
 	}
 }
