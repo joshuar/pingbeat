@@ -209,7 +209,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 							rtt := time.Since(state.Pings[ping.Seq].Sent)
 							delete(state.Pings, ping.Seq)
 							state.MU.Unlock()
-							p.ProcessPing(target, rtt)
+							go p.ProcessPing(target, rtt)
 						}
 					}
 				}
