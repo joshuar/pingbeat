@@ -36,13 +36,7 @@ type Pingbeat struct {
 	done        chan struct{}
 }
 
-type PingSent struct {
-	Seq    int
-	Target net.Addr
-	Sent   time.Time
-}
-
-type PingRecv struct {
+type PingInfo struct {
 	Seq        int
 	Target     string
 	Loss       bool
@@ -194,29 +188,28 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				if err := result.Error(); err != nil {
 					logp.Err("Send unsuccessful: %v", err)
 				} else {
-					// ping := result.Value().(icmp.Type)
+					info := result.Value().(*PingInfo)
 
 					var recv pool.WorkUnit
-					switch result.Value().(icmp.Type) {
-					case ipv4.ICMPTypeEcho:
+
+					if net.ParseIP(info.Target).To4() != nil {
 						recv = rpool.Queue(RecvPing(c4))
-					case ipv6.ICMPTypeEchoRequest:
+					} else {
 						recv = rpool.Queue(RecvPing(c6))
-					default:
-						logp.Err("Invalid ICMP message type")
 					}
+
 					recv.Wait()
 					if err := recv.Error(); err != nil {
 						logp.Err("Recv unsuccessful: %v", err)
 					} else {
-						ping := recv.Value().(*PingRecv)
+						ping := recv.Value().(*PingInfo)
 						if ping.Loss == false {
 							target := ping.Target
 							state.MU.Lock()
 							rtt := time.Since(state.Pings[ping.Seq].Sent)
 							delete(state.Pings, ping.Seq)
 							state.MU.Unlock()
-							go p.ProcessPing(target, rtt)
+							p.ProcessPing(target, rtt)
 						}
 					}
 				}
@@ -367,11 +360,12 @@ func (p *Pingbeat) QueueRequests(state *PingState, conn *icmp.PacketConn, batch 
 		state.MU.Lock()
 		state.Pings[seq] = NewPingRecord(addr)
 		state.MU.Unlock()
+
 	}
 	batch.QueueComplete()
 }
 
-func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string, net string) pool.WorkFunc {
+func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string, network string) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		if wu.IsCancelled() {
 			logp.Debug("pingbeat", "SendPing: workunit cancelled")
@@ -384,19 +378,38 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string
 		case conn.IPv4PacketConn() != nil:
 			ping_type = ipv6.ICMPTypeEchoRequest
 		default:
-			logp.Err("QueueRequests: Unknown connection type")
-		}
-		req, err := NewPingRequest(seq, ping_type, addr, net)
-		if err != nil {
-			logp.Err("QueueTargets: %v", err)
-		}
-		if _, err := conn.WriteTo(req.binary_payload, req.addr); err != nil {
+			err := errors.New("Unknown connection type")
 			return nil, err
+		}
+		var dest net.Addr
+		if network[:2] == "ip" {
+			dest = &net.IPAddr{IP: net.ParseIP(addr)}
+		} else {
+			dest = &net.UDPAddr{IP: net.ParseIP(addr)}
+		}
+		message := &icmp.Message{
+			Type: ping_type, Code: 0,
+			Body: &icmp.Echo{
+				ID:   os.Getpid() & 0xffff,
+				Seq:  seq,
+				Data: []byte("pingbeat: y'know, for pings"),
+			},
+		}
+		binary, err := message.Marshal(nil)
+		if err != nil {
+			return nil, err
+		}
+		ping := &PingInfo{
+			Seq:    seq,
+			Target: addr,
+		}
+		if _, err := conn.WriteTo(binary, dest); err != nil {
+			return ping, err
 		} else {
 			if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-				return nil, err
+				return ping, err
 			}
-			return req.ping_type, nil
+			return ping, nil
 		}
 	}
 }
@@ -417,23 +430,19 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			err := errors.New("Unknown connection type")
 			return nil, err
 		}
-		rep, err := NewPingReply(ping_type)
+
+		binary := make([]byte, 1500)
+
+		n, peer, err := conn.ReadFrom(binary)
 		if err != nil {
 			return nil, err
 		}
-		n, peer, err := conn.ReadFrom(rep.binary_payload)
+		message, err := icmp.ParseMessage(ping_type.Protocol(), binary[:n])
 		if err != nil {
 			return nil, err
 		}
-		rep.target = peer.String()
-		rm, err := icmp.ParseMessage(rep.ping_type.Protocol(), rep.binary_payload[:n])
-		if err != nil {
-			return nil, err
-		} else {
-			rep.text_payload = rm
-		}
-		ping := &PingRecv{}
-		switch rep.text_payload.Body.(type) {
+		ping := &PingInfo{}
+		switch message.Body.(type) {
 		case *icmp.TimeExceeded:
 			ping.Loss = true
 			ping.LossReason = "Time Exceeded"
@@ -445,16 +454,14 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 		case *icmp.DstUnreach:
 			ping.LossReason = "Destination Unreachable"
 			var d []byte
-			d = rep.text_payload.Body.(*icmp.DstUnreach).Data
+			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
 			spew.Dump(header)
-			// rm, err := icmp.ParseMessage(ipv4.ICMPTypeEcho.Protocol(), d[len(d)-8:])
-			// spew.Dump(rm)
 			ping.Loss = true
 			return nil, err
 		case *icmp.Echo:
-			ping.Seq = rep.text_payload.Body.(*icmp.Echo).Seq
-			ping.Target = rep.target
+			ping.Seq = message.Body.(*icmp.Echo).Seq
+			ping.Target = peer.String()
 			ping.Loss = false
 			return ping, nil
 		default:
