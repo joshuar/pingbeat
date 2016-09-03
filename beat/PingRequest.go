@@ -10,14 +10,12 @@ type PingRequest struct {
 	text_payload   *icmp.Message
 	binary_payload []byte
 	ping_type      icmp.Type
-	target         string
 	addr           net.Addr
 	seq_no         int
 }
 
 func NewPingRequest(seq_no int, ping_type icmp.Type, target string, network string) (*PingRequest, error) {
 	pr := &PingRequest{}
-	pr.target = target
 	pr.addr = pr.toAddr(target, network)
 	pr.ping_type = ping_type
 	pr.seq_no = seq_no
