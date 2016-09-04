@@ -136,11 +136,13 @@ func (p *Pingbeat) Setup(b *beat.Beat) error {
 }
 
 func (p *Pingbeat) Run(b *beat.Beat) error {
+	// Set up send/receive pools
 	spool := pool.New()
 	defer spool.Close()
 	rpool := pool.New()
 	defer rpool.Close()
 
+	// Set up a ticker to loop for the period specified
 	ticker := time.NewTicker(p.period)
 	defer ticker.Stop()
 
@@ -154,29 +156,33 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		}
 	}
 
+	// Create IPv4/IPv6 connections where required
 	c4 := &icmp.PacketConn{}
 	if p.useIPv4 {
 		c4 = createConn(p.ipv4network, "0.0.0.0")
 	}
 	defer c4.Close()
-
 	c6 := &icmp.PacketConn{}
 	if p.useIPv6 {
 		c6 = createConn(p.ipv6network, "::")
 	}
 	defer c6.Close()
 
+	// Create a new global state to track active ping requests
 	state := NewPingState()
 
 	for {
 		select {
 		case <-p.done:
+			// We're done, stop the ticker and close send/receive pools
 			ticker.Stop()
 			spool.Close()
 			rpool.Close()
 			return nil
 		case <-ticker.C:
+			// Set up a batch queue job to send echo requests
 			sendBatch := spool.Batch()
+			// Send echo requests to batch queue
 			if p.useIPv4 {
 				go p.QueueRequests(state, c4, sendBatch)
 			}
@@ -185,13 +191,14 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			}
 
 			for result := range sendBatch.Results() {
+				// Grab info of the sent request
+				info := result.Value().(*PingInfo)
 				if err := result.Error(); err != nil {
-					logp.Err("Send unsuccessful: %v", err)
+					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
+
 				} else {
-					info := result.Value().(*PingInfo)
-
 					var recv pool.WorkUnit
-
+					// Queue a reciever for every request sent
 					if net.ParseIP(info.Target).To4() != nil {
 						recv = rpool.Queue(RecvPing(c4))
 					} else {
@@ -200,9 +207,11 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 					recv.Wait()
 					if err := recv.Error(); err != nil {
-						logp.Err("Recv unsuccessful: %v", err)
+						logp.Debug("pingbeat", "Recv unsuccessful: %v", err)
 					} else {
+						// Grab info of the received reply
 						ping := recv.Value().(*PingInfo)
+						// If this reply doesn't indicate loss, record it
 						if ping.Loss == false {
 							target := ping.Target
 							state.MU.Lock()
@@ -214,6 +223,8 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					}
 				}
 			}
+			// Clean out the global state of active ping requests marking any still
+			// not received as lost
 			p.ProcessMissing(state)
 		}
 	}
@@ -278,13 +289,6 @@ func (p *Pingbeat) FetchDetails(addr string) (string, string) {
 		tag = "err"
 	}
 	return name, tag
-}
-
-// milliSeconds converts seconds to milliseconds
-func milliSeconds(d time.Duration) float64 {
-	msec := d / time.Millisecond
-	nsec := d % time.Millisecond
-	return float64(msec) + float64(nsec)*1e-6
 }
 
 // FetchIPs takes a target hostname, resolves the IP addresses for that
@@ -357,6 +361,7 @@ func (p *Pingbeat) QueueRequests(state *PingState, conn *icmp.PacketConn, batch 
 	for addr, _ := range targets {
 		seq := state.GetSeqNo()
 		batch.Queue(SendPing(conn, p.period, seq, addr, network))
+		// Record the queued ping in the global ping state
 		state.MU.Lock()
 		state.Pings[seq] = NewPingRecord(addr)
 		state.MU.Unlock()
@@ -371,6 +376,8 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string
 			logp.Debug("pingbeat", "SendPing: workunit cancelled")
 			return nil, nil
 		}
+		// Based on the connection, work out whether we are dealing with
+		// IPv4 or IPv6 ICMP messages
 		var ping_type icmp.Type
 		switch {
 		case conn.IPv4PacketConn() != nil:
@@ -381,12 +388,14 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string
 			err := errors.New("Unknown connection type")
 			return nil, err
 		}
+		// Based on the network type, create the appropriate net.Addr type
 		var dest net.Addr
 		if network[:2] == "ip" {
 			dest = &net.IPAddr{IP: net.ParseIP(addr)}
 		} else {
 			dest = &net.UDPAddr{IP: net.ParseIP(addr)}
 		}
+		// Create an ICMP Echo Request
 		message := &icmp.Message{
 			Type: ping_type, Code: 0,
 			Body: &icmp.Echo{
@@ -395,6 +404,7 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string
 				Data: []byte("pingbeat: y'know, for pings"),
 			},
 		}
+		// Marshall the Echo request for sending via a connection
 		binary, err := message.Marshal(nil)
 		if err != nil {
 			return nil, err
@@ -403,6 +413,7 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr string
 			Seq:    seq,
 			Target: addr,
 		}
+		// Send the request and if successful, set a read deadline for the connection
 		if _, err := conn.WriteTo(binary, dest); err != nil {
 			return ping, err
 		} else {
@@ -420,6 +431,8 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
 			return nil, nil
 		}
+		// Based on the connection, work out whether we are dealing with
+		// IPv4 or IPv6 ICMP messages
 		var ping_type icmp.Type
 		switch {
 		case conn.IPv4PacketConn() != nil:
@@ -431,17 +444,20 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			return nil, err
 		}
 
+		// Read data from the connection
 		binary := make([]byte, 1500)
-
 		n, peer, err := conn.ReadFrom(binary)
 		if err != nil {
 			return nil, err
 		}
+		// Parse the data into an ICMP message
 		message, err := icmp.ParseMessage(ping_type.Protocol(), binary[:n])
 		if err != nil {
 			return nil, err
 		}
+
 		ping := &PingInfo{}
+		// Switch for the ICMP message type
 		switch message.Body.(type) {
 		case *icmp.TimeExceeded:
 			ping.Loss = true
@@ -469,4 +485,11 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			return nil, err
 		}
 	}
+}
+
+// milliSeconds converts seconds to milliseconds
+func milliSeconds(d time.Duration) float64 {
+	msec := d / time.Millisecond
+	nsec := d % time.Millisecond
+	return float64(msec) + float64(nsec)*1e-6
 }
