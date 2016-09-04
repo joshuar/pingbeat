@@ -219,6 +219,8 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 							delete(state.Pings, ping.Seq)
 							state.MU.Unlock()
 							go p.ProcessPing(target, rtt)
+						} else {
+							spew.Dump(ping)
 						}
 					}
 				}
@@ -460,21 +462,29 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 		// Switch for the ICMP message type
 		switch message.Body.(type) {
 		case *icmp.TimeExceeded:
-			ping.Loss = true
-			ping.LossReason = "Time Exceeded"
-			return nil, err
-		case *icmp.PacketTooBig:
-			ping.LossReason = "Packet Too Big"
-			ping.Loss = true
-			return nil, err
-		case *icmp.DstUnreach:
-			ping.LossReason = "Destination Unreachable"
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
-			spew.Dump(header)
+			ping.Target = header.Dst.String()
 			ping.Loss = true
-			return nil, err
+			ping.LossReason = "Time Exceeded"
+			return ping, nil
+		case *icmp.PacketTooBig:
+			var d []byte
+			d = message.Body.(*icmp.DstUnreach).Data
+			header, _ := ipv4.ParseHeader(d[:len(d)-8])
+			ping.Target = header.Dst.String()
+			ping.Loss = true
+			ping.LossReason = "Packet Too Big"
+			return ping, nil
+		case *icmp.DstUnreach:
+			var d []byte
+			d = message.Body.(*icmp.DstUnreach).Data
+			header, _ := ipv4.ParseHeader(d[:len(d)-8])
+			ping.Target = header.Dst.String()
+			ping.Loss = true
+			ping.LossReason = "Destination Unreachable"
+			return ping, nil
 		case *icmp.Echo:
 			ping.Seq = message.Body.(*icmp.Echo).Seq
 			ping.Target = peer.String()
