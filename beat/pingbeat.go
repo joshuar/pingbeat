@@ -2,7 +2,7 @@ package pingbeat
 
 import (
 	"errors"
-	"github.com/davecgh/go-spew/spew"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -220,7 +220,7 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 							state.MU.Unlock()
 							go p.ProcessPing(target, rtt)
 						} else {
-							spew.Dump(ping)
+							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
 						}
 					}
 				}
