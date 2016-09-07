@@ -28,12 +28,19 @@ type Pingbeat struct {
 	period      time.Duration
 	ipv4network string
 	ipv6network string
-	ipv4targets map[net.Addr][2]string
-	ipv6targets map[net.Addr][2]string
+	ipv4conn    *icmp.PacketConn
+	ipv6conn    *icmp.PacketConn
+	targets     map[string]Target
 	geoipdb     *geoip2.Reader
 	config      cfg.ConfigSettings
 	events      publisher.Client
 	done        chan struct{}
+}
+
+type Target struct {
+	Addr net.Addr
+	Name string
+	Tag  string
 }
 
 type PingInfo struct {
@@ -50,6 +57,16 @@ func New() *Pingbeat {
 // Config reads in the pingbeat configuration file, validating
 // configuration parameters and setting default values where needed
 func (p *Pingbeat) Config(b *beat.Beat) error {
+	createConn := func(n string, a string) *icmp.PacketConn {
+		c, err := icmp.ListenPacket(n, a)
+		if err != nil {
+			logp.Err("Error creating connection: %v", err)
+			return nil
+		} else {
+			return c
+		}
+	}
+
 	// Read in provided config file, bail if problem
 	err := cfgfile.Read(&p.config, "")
 	if err != nil {
@@ -83,7 +100,6 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	} else {
 		p.ipv4network = "udp4"
 		p.ipv6network = "udp6"
-
 	}
 	logp.Debug("pingbeat", "Using %v and/or %v for pings\n", p.ipv4network, p.ipv6network)
 
@@ -91,19 +107,22 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	// Default to just IPv4 pings
 	if &p.config.Input.UseIPv4 != nil {
 		p.useIPv4 = *p.config.Input.UseIPv4
+		p.ipv4conn = createConn(p.ipv4network, "0.0.0.0")
 	} else {
 		p.useIPv4 = true
+		p.ipv4conn = createConn(p.ipv4network, "0.0.0.0")
+		defer p.ipv4conn.Close()
 	}
 	if &p.config.Input.UseIPv6 != nil {
 		p.useIPv6 = *p.config.Input.UseIPv6
+		p.ipv6conn = createConn(p.ipv6network, "::")
 	} else {
 		p.useIPv6 = false
 	}
 	logp.Debug("pingbeat", "Using IPv4: %v. Using IPv6: %v\n", p.useIPv4, p.useIPv6)
 
 	// Fill the IPv4/IPv6 targets maps
-	p.ipv4targets = make(map[net.Addr][2]string)
-	p.ipv6targets = make(map[net.Addr][2]string)
+	p.targets = make(map[string]Target)
 	if p.config.Input.Targets != nil {
 		for tag, targets := range *p.config.Input.Targets {
 			for i := 0; i < len(targets); i++ {
@@ -114,7 +133,6 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		err := errors.New("No targets specified, cannot continue!")
 		return err
 	}
-
 	// Check and load the GeoIP database
 	if p.config.Input.GeoIPDB != nil {
 		db, err := geoip2.Open(*p.config.Input.GeoIPDB)
@@ -146,28 +164,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	ticker := time.NewTicker(p.period)
 	defer ticker.Stop()
 
-	createConn := func(n string, a string) *icmp.PacketConn {
-		c, err := icmp.ListenPacket(n, a)
-		if err != nil {
-			logp.Err("Error creating connection: %v", err)
-			return nil
-		} else {
-			return c
-		}
-	}
-
-	// Create IPv4/IPv6 connections where required
-	c4 := &icmp.PacketConn{}
-	if p.useIPv4 {
-		c4 = createConn(p.ipv4network, "0.0.0.0")
-	}
-	defer c4.Close()
-	c6 := &icmp.PacketConn{}
-	if p.useIPv6 {
-		c6 = createConn(p.ipv6network, "::")
-	}
-	defer c6.Close()
-
 	// Create a new global state to track active ping requests
 	state := NewPingState()
 
@@ -175,21 +171,22 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 		select {
 		case <-p.done:
 			// We're done, stop the ticker and close send/receive pools
+			p.ipv4conn.Close()
+			p.ipv6conn.Close()
 			ticker.Stop()
 			spool.Close()
 			rpool.Close()
 			return nil
 		case <-ticker.C:
 			// Set up a batch queue job to send echo requests
+			spool.Cancel()
+			spool.Reset()
 			sendBatch := spool.Batch()
-			// Send echo requests to batch queue
-			if p.useIPv4 {
-				go QueueRequests(p.ipv4targets, state, c4, p.period, sendBatch)
-			}
-			if p.useIPv6 {
-				go QueueRequests(p.ipv6targets, state, c6, p.period, sendBatch)
-			}
 
+			// Batch queue echo
+			go p.QueueRequests(state, sendBatch)
+
+			// For each successfully sent echo request
 			for result := range sendBatch.Results() {
 				// Grab info of the sent request
 				info := result.Value().(*PingInfo)
@@ -198,11 +195,11 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 
 				} else {
 					var recv pool.WorkUnit
-					// Queue a reciever for every request sent
+					// Queue a reciever
 					if net.ParseIP(info.Target.String()).To4() != nil {
-						recv = rpool.Queue(RecvPing(c4))
+						recv = rpool.Queue(RecvPing(p.ipv4conn))
 					} else {
-						recv = rpool.Queue(RecvPing(c6))
+						recv = rpool.Queue(RecvPing(p.ipv6conn))
 					}
 
 					recv.Wait()
@@ -218,11 +215,12 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 							rtt := time.Since(state.Pings[ping.Seq].Sent)
 							delete(state.Pings, ping.Seq)
 							state.MU.Unlock()
-							go p.ProcessPing(target, rtt)
+							go p.ProcessPing(target.String(), rtt)
 						} else {
 							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
 						}
 					}
+					recv.Cancel()
 				}
 			}
 			// Clean out the global state of active ping requests marking any still
@@ -243,19 +241,20 @@ func (p *Pingbeat) Stop() {
 // AddTarget takes a target name and tag, fetches the IP addresses associated
 // with it and adds them to the Pingbeat struct
 func (p *Pingbeat) AddTarget(target string, tag string) {
-	var addr net.Addr
-	if ip := net.ParseIP(target); ip.String() == target {
+	string2addr := func(t string) net.Addr {
 		switch p.ipv4network[:2] {
 		case "ip":
-			addr = &net.IPAddr{IP: ip}
+			return &net.IPAddr{IP: net.ParseIP(t)}
 		default:
-			addr = &net.UDPAddr{IP: ip}
+			return &net.UDPAddr{IP: net.ParseIP(t)}
 		}
-		if p.useIPv4 {
-			p.ipv4targets[addr] = [2]string{target, tag}
-		}
-		if p.useIPv6 {
-			p.ipv6targets[addr] = [2]string{target, tag}
+	}
+
+	if net.ParseIP(target) != nil {
+		p.targets[target] = Target{
+			Addr: string2addr(target),
+			Name: target,
+			Tag:  tag,
 		}
 	} else {
 		ip4addr := make(chan string)
@@ -268,27 +267,23 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 				if ip == "done" {
 					break lookup
 				} else if p.useIPv4 {
-					switch p.ipv4network[:2] {
-					case "ip":
-						addr = &net.IPAddr{IP: net.ParseIP(ip)}
-					default:
-						addr = &net.UDPAddr{IP: net.ParseIP(ip)}
+					p.targets[ip] = Target{
+						Addr: string2addr(ip),
+						Name: target,
+						Tag:  tag,
 					}
 					logp.Debug("pingbeat", "Target %s has an IPv4 address %s\n", target, ip)
-					p.ipv4targets[addr] = [2]string{target, tag}
 				}
 			case ip := <-ip6addr:
 				if ip == "done" {
 					break lookup
 				} else if p.useIPv6 {
-					switch p.ipv4network[:2] {
-					case "ip":
-						addr = &net.IPAddr{IP: net.ParseIP(ip)}
-					default:
-						addr = &net.UDPAddr{IP: net.ParseIP(ip)}
+					p.targets[ip] = Target{
+						Addr: string2addr(ip),
+						Name: target,
+						Tag:  tag,
 					}
 					logp.Debug("pingbeat", "Target %s has an IPv6 address %s\n", target, ip)
-					p.ipv6targets[addr] = [2]string{target, tag}
 				}
 			}
 		}
@@ -297,16 +292,13 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 
 // Addr2Name takes a address as a string and returns the name and tag
 // associated with that address in the Pingbeat struct
-func (p *Pingbeat) FetchDetails(addr net.Addr) (string, string) {
+func (p *Pingbeat) FetchDetails(t string) (string, string) {
 	var name, tag string
-	if _, found := p.ipv4targets[addr]; found {
-		name = p.ipv4targets[addr][0]
-		tag = p.ipv4targets[addr][1]
-	} else if _, found := p.ipv6targets[addr]; found {
-		name = p.ipv6targets[addr][0]
-		tag = p.ipv6targets[addr][1]
+	if _, found := p.targets[t]; found {
+		name = p.targets[t].Name
+		tag = p.targets[t].Tag
 	} else {
-		logp.Err("Error: %s not found in Pingbeat targets!", addr)
+		logp.Err("Error: %s not found in Pingbeat targets!", t)
 		name = "err"
 		tag = "err"
 	}
@@ -336,7 +328,7 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 	return
 }
 
-func (p *Pingbeat) ProcessPing(target net.Addr, rtt time.Duration) {
+func (p *Pingbeat) ProcessPing(target string, rtt time.Duration) {
 	name, tag := p.FetchDetails(target)
 	event := common.MapStr{
 		"@timestamp":  common.Time(time.Now().UTC()),
@@ -367,13 +359,17 @@ func (p *Pingbeat) ProcessMissing(state *PingState) {
 	}
 }
 
-func QueueRequests(targets map[net.Addr][2]string, state *PingState, conn *icmp.PacketConn, timeout time.Duration, batch pool.Batch) {
-	for addr, _ := range targets {
+func (p *Pingbeat) QueueRequests(state *PingState, batch pool.Batch) {
+	for ip, target := range p.targets {
 		seq := state.GetSeqNo()
-		batch.Queue(SendPing(conn, timeout, seq, addr))
+		if net.ParseIP(ip).To4() != nil {
+			batch.Queue(SendPing(p.ipv4conn, p.period, seq, target.Addr))
+		} else {
+			batch.Queue(SendPing(p.ipv6conn, p.period, seq, target.Addr))
+		}
 		// Record the queued ping in the global ping state
 		state.MU.Lock()
-		state.Pings[seq] = NewPingRecord(addr)
+		state.Pings[seq] = NewPingRecord(ip)
 		state.MU.Unlock()
 
 	}

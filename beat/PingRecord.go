@@ -1,16 +1,15 @@
 package pingbeat
 
 import (
-	"net"
 	"time"
 )
 
 type PingRecord struct {
-	Target net.Addr
+	Target string
 	Sent   time.Time
 }
 
-func NewPingRecord(target net.Addr) *PingRecord {
+func NewPingRecord(target string) *PingRecord {
 	return &PingRecord{
 		Target: target,
 		Sent:   time.Now().UTC(),
