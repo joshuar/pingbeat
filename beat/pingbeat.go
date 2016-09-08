@@ -92,7 +92,7 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	// else use a UDP ping
 	if *p.config.Input.Privileged {
 		if os.Getuid() != 0 {
-			err := errors.New("Privileged set but not running with privleges!")
+			err := errors.New("Privileged specified but not running with privleges!")
 			return err
 		}
 		p.ipv4network = "ip4:icmp"
@@ -104,14 +104,15 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	logp.Debug("pingbeat", "Using %v and/or %v for pings\n", p.ipv4network, p.ipv6network)
 
 	// Check whether IPv4/IPv6 pings are requested in config
-	// Default to just IPv4 pings
+	if &p.config.Input.UseIPv4 == nil && &p.config.Input.UseIPv6 == nil {
+		err := errors.New("Neither useIPv4 or useIPv6 specified.  At least one required!")
+		return err
+	}
 	if &p.config.Input.UseIPv4 != nil {
 		p.useIPv4 = *p.config.Input.UseIPv4
 		p.ipv4conn = createConn(p.ipv4network, "0.0.0.0")
 	} else {
-		p.useIPv4 = true
-		p.ipv4conn = createConn(p.ipv4network, "0.0.0.0")
-		defer p.ipv4conn.Close()
+		p.useIPv4 = false
 	}
 	if &p.config.Input.UseIPv6 != nil {
 		p.useIPv6 = *p.config.Input.UseIPv6
@@ -178,12 +179,17 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			rpool.Close()
 			return nil
 		case <-ticker.C:
-			// Set up a batch queue job to send echo requests
 			spool.Cancel()
 			spool.Reset()
-			sendBatch := spool.Batch()
+			rpool.Cancel()
+			rpool.Reset()
+
+			// Clean out the global state of active ping requests marking any still
+			// not received as lost
+			p.ProcessMissing(state)
 
 			// Batch queue echo
+			sendBatch := spool.Batch()
 			go p.QueueRequests(state, sendBatch)
 
 			// For each successfully sent echo request
@@ -192,7 +198,6 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				info := result.Value().(*PingInfo)
 				if err := result.Error(); err != nil {
 					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
-
 				} else {
 					var recv pool.WorkUnit
 					// Queue a reciever
@@ -209,23 +214,20 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 						// Grab info of the received reply
 						ping := recv.Value().(*PingInfo)
 						// If this reply doesn't indicate loss, record it
-						if ping.Loss == false {
+						if ping.Loss {
+							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
+						} else {
 							target := ping.Target
 							state.MU.Lock()
 							rtt := time.Since(state.Pings[ping.Seq].Sent)
 							delete(state.Pings, ping.Seq)
 							state.MU.Unlock()
 							go p.ProcessPing(target.String(), rtt)
-						} else {
-							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
 						}
 					}
 					recv.Cancel()
 				}
 			}
-			// Clean out the global state of active ping requests marking any still
-			// not received as lost
-			p.ProcessMissing(state)
 		}
 	}
 }
@@ -448,6 +450,7 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 		binary := make([]byte, 1500)
 		n, peer, err := conn.ReadFrom(binary)
 		if err != nil {
+			binary = nil
 			return nil, err
 		}
 		// Parse the data into an ICMP message
@@ -456,34 +459,37 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			return nil, err
 		}
 
-		ping := &PingInfo{}
 		// Switch for the ICMP message type
 		switch message.Body.(type) {
 		case *icmp.TimeExceeded:
+			ping := &PingInfo{}
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
 			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
 			ping.Loss = true
 			ping.LossReason = "Time Exceeded"
-			return ping, nil
+			return ping, errors.New(ping.LossReason)
 		case *icmp.PacketTooBig:
+			ping := &PingInfo{}
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
 			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
 			ping.Loss = true
 			ping.LossReason = "Packet Too Big"
-			return ping, nil
+			return ping, errors.New(ping.LossReason)
 		case *icmp.DstUnreach:
+			ping := &PingInfo{}
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
 			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
 			ping.Loss = true
 			ping.LossReason = "Destination Unreachable"
-			return ping, nil
+			return ping, errors.New(ping.LossReason)
 		case *icmp.Echo:
+			ping := &PingInfo{}
 			ping.Seq = message.Body.(*icmp.Echo).Seq
 			ping.Target = peer
 			ping.Loss = false

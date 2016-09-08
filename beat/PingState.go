@@ -3,7 +3,20 @@ package pingbeat
 import (
 	"github.com/elastic/beats/libbeat/logp"
 	"sync"
+	"time"
 )
+
+type PingRecord struct {
+	Target string
+	Sent   time.Time
+}
+
+func NewPingRecord(target string) *PingRecord {
+	return &PingRecord{
+		Target: target,
+		Sent:   time.Now().UTC(),
+	}
+}
 
 type PingState struct {
 	MU    sync.RWMutex
@@ -12,7 +25,10 @@ type PingState struct {
 }
 
 func NewPingState() *PingState {
-	return &PingState{SeqNo: 0, Pings: make(map[int]*PingRecord)}
+	return &PingState{
+		SeqNo: 0,
+		Pings: make(map[int]*PingRecord),
+	}
 }
 
 func (p *PingState) GetSeqNo() int {
