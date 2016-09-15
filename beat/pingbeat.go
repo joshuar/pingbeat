@@ -2,7 +2,7 @@ package pingbeat
 
 import (
 	"errors"
-	// "github.com/davecgh/go-spew/spew"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -57,13 +57,13 @@ func New() *Pingbeat {
 // Config reads in the pingbeat configuration file, validating
 // configuration parameters and setting default values where needed
 func (p *Pingbeat) Config(b *beat.Beat) error {
-	createConn := func(n string, a string) *icmp.PacketConn {
+	createConn := func(n string, a string) (*icmp.PacketConn, error) {
+		logp.Info("%v, %v", n, a)
 		c, err := icmp.ListenPacket(n, a)
 		if err != nil {
-			logp.Err("Error creating connection: %v", err)
-			return nil
+			return nil, err
 		} else {
-			return c
+			return c, nil
 		}
 	}
 
@@ -108,17 +108,19 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		err := errors.New("Neither useIPv4 or useIPv6 specified.  At least one required!")
 		return err
 	}
-	if &p.config.Input.UseIPv4 != nil {
-		p.useIPv4 = *p.config.Input.UseIPv4
-		p.ipv4conn = createConn(p.ipv4network, "0.0.0.0")
-	} else {
-		p.useIPv4 = false
+	p.useIPv4 = *p.config.Input.UseIPv4
+	if p.useIPv4 {
+		p.ipv4conn, err = createConn(p.ipv4network, "0.0.0.0")
+		if err != nil {
+			return err
+		}
 	}
-	if &p.config.Input.UseIPv6 != nil {
-		p.useIPv6 = *p.config.Input.UseIPv6
-		p.ipv6conn = createConn(p.ipv6network, "::")
-	} else {
-		p.useIPv6 = false
+	p.useIPv6 = *p.config.Input.UseIPv6
+	if p.useIPv6 {
+		p.ipv6conn, err = createConn(p.ipv6network, "::")
+		if err != nil {
+			return err
+		}
 	}
 	logp.Debug("pingbeat", "Using IPv4: %v. Using IPv6: %v\n", p.useIPv4, p.useIPv6)
 
@@ -200,8 +202,18 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
 				} else {
 					var recv pool.WorkUnit
+					var t string
 					// Queue a reciever
-					if net.ParseIP(info.Target.String()).To4() != nil {
+					spew.Dump(info.Target.String())
+					switch info.Target.(type) {
+					case *net.UDPAddr:
+						t, _, _ = net.SplitHostPort(info.Target.String())
+					case *net.IPAddr:
+						t = info.Target.String()
+					default:
+						logp.Debug("Error parsing received address %v", t)
+					}
+					if net.ParseIP(t).To4() != nil {
 						recv = rpool.Queue(RecvPing(p.ipv4conn))
 					} else {
 						recv = rpool.Queue(RecvPing(p.ipv6conn))
@@ -219,10 +231,14 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 						} else {
 							target := ping.Target
 							state.MU.Lock()
-							rtt := time.Since(state.Pings[ping.Seq].Sent)
-							delete(state.Pings, ping.Seq)
+							if state.Pings[ping.Seq] != nil {
+								rtt := time.Since(state.Pings[ping.Seq].Sent)
+								delete(state.Pings, ping.Seq)
+								go p.ProcessPing(target.String(), rtt)
+							} else {
+								logp.Debug("pingbeat", "Got a ping response that we aren't tracking: %v, %v", ping.Target, ping.Seq)
+							}
 							state.MU.Unlock()
-							go p.ProcessPing(target.String(), rtt)
 						}
 					}
 					recv.Cancel()
@@ -433,6 +449,7 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
 			return nil, nil
 		}
+		// spew.Dump(conn)
 		// Based on the connection, work out whether we are dealing with
 		// IPv4 or IPv6 ICMP messages
 		var ping_type icmp.Type
