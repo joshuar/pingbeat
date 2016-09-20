@@ -2,7 +2,7 @@ package pingbeat
 
 import (
 	"errors"
-	"github.com/davecgh/go-spew/spew"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -45,7 +45,7 @@ type Target struct {
 
 type PingInfo struct {
 	Seq        int
-	Target     net.Addr
+	Target     string
 	Loss       bool
 	LossReason string
 }
@@ -202,18 +202,8 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
 				} else {
 					var recv pool.WorkUnit
-					var t string
 					// Queue a reciever
-					spew.Dump(info.Target.String())
-					switch info.Target.(type) {
-					case *net.UDPAddr:
-						t, _, _ = net.SplitHostPort(info.Target.String())
-					case *net.IPAddr:
-						t = info.Target.String()
-					default:
-						logp.Debug("Error parsing received address %v", t)
-					}
-					if net.ParseIP(t).To4() != nil {
+					if net.ParseIP(info.Target).To4() != nil {
 						recv = rpool.Queue(RecvPing(p.ipv4conn))
 					} else {
 						recv = rpool.Queue(RecvPing(p.ipv6conn))
@@ -229,12 +219,11 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 						if ping.Loss {
 							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
 						} else {
-							target := ping.Target
 							state.MU.Lock()
 							if state.Pings[ping.Seq] != nil {
 								rtt := time.Since(state.Pings[ping.Seq].Sent)
 								delete(state.Pings, ping.Seq)
-								go p.ProcessPing(target.String(), rtt)
+								go p.ProcessPing(ping.Target, rtt)
 							} else {
 								logp.Debug("pingbeat", "Got a ping response that we aren't tracking: %v, %v", ping.Target, ping.Seq)
 							}
@@ -427,9 +416,20 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 		if err != nil {
 			return nil, err
 		}
+		var t string
+		switch addr.(type) {
+		case *net.UDPAddr:
+			t, _, _ = net.SplitHostPort(addr.String())
+		case *net.IPAddr:
+			t = addr.String()
+		default:
+			err := errors.New("Unknown address type")
+			return nil, err
+		}
+
 		ping := &PingInfo{
 			Seq:    seq,
-			Target: addr,
+			Target: t,
 		}
 		// Send the request and if successful, set a read deadline for the connection
 		if _, err := conn.WriteTo(binary, addr); err != nil {
@@ -449,7 +449,6 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			logp.Debug("pingbeat", "RecvPing: workunit cancelled")
 			return nil, nil
 		}
-		// spew.Dump(conn)
 		// Based on the connection, work out whether we are dealing with
 		// IPv4 or IPv6 ICMP messages
 		var ping_type icmp.Type
@@ -470,6 +469,16 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			binary = nil
 			return nil, err
 		}
+		var target string
+		switch peer.(type) {
+		case *net.UDPAddr:
+			target, _, _ = net.SplitHostPort(peer.String())
+		case *net.IPAddr:
+			target = peer.String()
+		default:
+			logp.Debug("Error parsing received address %v", target)
+		}
+
 		// Parse the data into an ICMP message
 		message, err := icmp.ParseMessage(ping_type.Protocol(), binary[:n])
 		if err != nil {
@@ -483,7 +492,7 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
+			ping.Target = header.Dst.String()
 			ping.Loss = true
 			ping.LossReason = "Time Exceeded"
 			return ping, errors.New(ping.LossReason)
@@ -492,7 +501,7 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
+			ping.Target = header.Dst.String()
 			ping.Loss = true
 			ping.LossReason = "Packet Too Big"
 			return ping, errors.New(ping.LossReason)
@@ -501,14 +510,14 @@ func RecvPing(conn *icmp.PacketConn) pool.WorkFunc {
 			var d []byte
 			d = message.Body.(*icmp.DstUnreach).Data
 			header, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ping.Target = &net.IPAddr{IP: net.ParseIP(header.Dst.String())}
+			ping.Target = header.Dst.String()
 			ping.Loss = true
 			ping.LossReason = "Destination Unreachable"
 			return ping, errors.New(ping.LossReason)
 		case *icmp.Echo:
 			ping := &PingInfo{}
 			ping.Seq = message.Body.(*icmp.Echo).Seq
-			ping.Target = peer
+			ping.Target = target
 			ping.Loss = false
 			return ping, nil
 		default:
