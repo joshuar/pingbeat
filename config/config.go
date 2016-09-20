@@ -1,7 +1,8 @@
 package config
 
 type PingConfig struct {
-	Period     *int64
+	Period     *string
+	GeoIPDB    *string
 	UseIPv4    *bool
 	UseIPv6    *bool
 	Privileged *bool

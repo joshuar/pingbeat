@@ -4,14 +4,13 @@
 input:
 
   # Loop every 5 seconds
-  period: 5
+  period: 5s
   # Use raw sockets for ping
   # Requires root!
   privileged: true
   # Whether to perform IPv4/v6 pings
   useipv4: true
   useipv6: false
-
   # List targets under the tag you want assigned to
   targets:
     # tag: google

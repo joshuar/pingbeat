@@ -57,3 +57,4 @@ profile.cov
 
 build
 glide
+pingbeat*.yml
