@@ -21,13 +21,29 @@ else
 	rm ./glide.zip
 endif
 
+cross:
+	test -d dist || mkdir dist
+	echo "Building Windows 32-bit..."
+	env GOOS=windows GOARCH=386 go build -o dist/pingbeat-windows-32.exe
+	echo "Building Windows 64-bit..."
+	env GOOS=windows GOARCH=amd64 go build -o dist/pingbeat-windows-64.exe
+	echo "Building Linux 32-bit..."
+	env GOOS=linux GOARCH=386 go build -o dist/pingbeat-linux-32.exe
+	echo "Building Linux 64-bit..."
+	env GOOS=linux GOARCH=amd64 go build -o dist/pingbeat-linux-64.exe
+	echo "Building OSX 32-bit..."
+	env GOOS=darwin GOARCH=386 go build -o dist/pingbeat-darwin-32.exe
+	echo "Building OSX 64-bit..."
+	env GOOS=darwin GOARCH=amd64 go build -o dist/pingbeat-darwin-64.exe
+
 test:
 	go test $(glide novendor)
 
 clean:
 	rm ./glide
+	rm dist/pingbeat-*
 
 install: deps test
 	go install
 
-.PHONY: all test clean glide install
+.PHONY: all test clean glide install cross
