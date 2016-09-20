@@ -5,11 +5,8 @@ pingbeat
 
 pingbeat sends ICMP pings to a list of targets and stores the round
 trip time (RTT) in Elasticsearch (or elsewhere).  It uses
-[tatsushid/go-fastping](https://github.com/tatsushid/go-fastping) for
-sending/recieving ping packets and
 [elastic/libbeat](https://github.com/elastic/libbeat) to talk to
-Elasticsearch and other outputs.  Essentially, those two libraries do
-all the heavy lifting, pingbeat is just glue around them.
+Elasticsearch and other outputs.
 
 ## Requirements
 
@@ -72,7 +69,9 @@ sockets, which can only be done with superuser privileges.  So you
 either need to run pingbeat with sudo or as root to send regular
 pings. If you don't want to do that, set `privileged: false` in your
 config and run pingbeat as a regular user.  It will then use a `UDP
-ping` to test connectivity.
+ping` to test connectivity.  You may still need to adjust the
+`net.ipv4.ping_group_range` sysctl variable to allow a regular user to
+send UDP ping packets.
 
 Alternatively, on Linux you can grant pingbeat access to raw sockets
 without the need to run with sudo or as root user, by granting the
