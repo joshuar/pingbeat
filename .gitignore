@@ -1,6 +1,12 @@
 /vendor/**/.git*
 
+# Test binaries and config files
 pingbeat
+pingbeat*.yml
+*.prof
+
+# Glide stuff
+glide
 
 # Directories
 /.vagrant
@@ -25,36 +31,5 @@ _test
 *~
 *.tmp
 
-# Compiled Object files, Static and Dynamic libs (Shared Objects)
-*.o
-*.a
-*.so
-*.exe
-*.test
-*.prof
-*.pyc
-
-# Architecture specific extensions/prefixes
-*.[568vq]
-[568vq].out
-
-*.cgo1.go
-*.cgo2.c
-_cgo_defun.c
-_cgo_gotypes.go
-_cgo_export.*
-
-_testmain.go
-
-
-/cover/
-/coverage/
-/tests/system/env/
-/tests/system/run/
-/tests/system/last_run
-profile.cov
-/docs/html_docs
-
-build
-glide
-pingbeat*.yml
+# Cross compile artifacts
+dist
