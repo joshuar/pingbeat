@@ -28,13 +28,13 @@ cross:
 	echo "Building Windows 64-bit..."
 	env GOOS=windows GOARCH=amd64 go build -o dist/pingbeat-windows-64.exe
 	echo "Building Linux 32-bit..."
-	env GOOS=linux GOARCH=386 go build -o dist/pingbeat-linux-32.exe
+	env GOOS=linux GOARCH=386 go build -o dist/pingbeat-linux-32
 	echo "Building Linux 64-bit..."
-	env GOOS=linux GOARCH=amd64 go build -o dist/pingbeat-linux-64.exe
+	env GOOS=linux GOARCH=amd64 go build -o dist/pingbeat-linux-64
 	echo "Building OSX 32-bit..."
-	env GOOS=darwin GOARCH=386 go build -o dist/pingbeat-darwin-32.exe
+	env GOOS=darwin GOARCH=386 go build -o dist/pingbeat-darwin-32
 	echo "Building OSX 64-bit..."
-	env GOOS=darwin GOARCH=amd64 go build -o dist/pingbeat-darwin-64.exe
+	env GOOS=darwin GOARCH=amd64 go build -o dist/pingbeat-darwin-64
 
 test:
 	go test $(glide novendor)
