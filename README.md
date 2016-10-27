@@ -5,7 +5,7 @@ pingbeat
 
 pingbeat sends ICMP pings to a list of targets and stores the round
 trip time (RTT) in Elasticsearch (or elsewhere).  It uses
-[elastic/libbeat](https://github.com/elastic/libbeat) to talk to
+[elastic/beats/libbeat](https://github.com/elastic/beats/tree/master/libbeat) to talk to
 Elasticsearch and other outputs.
 
 ## Requirements
