@@ -170,10 +170,10 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 	// Set up a ticker to loop for the period specified
 	ticker := time.NewTicker(p.period)
 	defer ticker.Stop()
-	timeout := time.NewTicker(p.timeout)
-	defer timeout.Stop()
 
 	// Create a new global state to track active ping requests
+	stpool := pool.NewLimited(10)
+	defer stpool.Close()
 	state := NewPingState()
 
 	for {
@@ -185,26 +185,43 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 			ticker.Stop()
 			spool.Close()
 			rpool.Close()
+			stpool.Close()
 			return nil
-		case <-timeout.C:
-			// Clean out the global state of active ping requests marking any still
-			// not received as lost
-			logp.Debug("pingbeat", "Cleaning out missing packets")
-			p.CleanStalePings(state)
-
 		case <-ticker.C:
 			spool.Cancel()
 			spool.Reset()
 			rpool.Cancel()
 			rpool.Reset()
 
-			// p.ProcessMissing(state)
+			req := stpool.Queue(state.CleanPings(p.timeout))
+			req.Wait()
+			if err := req.Error(); err != nil {
+				logp.Err("Error: cleanup failed")
+			}
 
 			// Batch queue echo request
 			sendBatch := spool.Batch()
-			go p.QueueRequests(state, sendBatch)
 			// Batch queue echo reply
 			recvBatch := rpool.Batch()
+
+			// go p.QueueRequests(state, sendBatch)
+			go func() {
+				for ip, target := range p.targets {
+					req := stpool.Queue(state.AddPing(ip))
+					req.Wait()
+					if err := req.Error(); err != nil {
+						logp.Err("Error: Adding %v: %v to state", req.Value().(int), target)
+					} else {
+						seq := req.Value().(int)
+						if net.ParseIP(ip).To4() != nil {
+							sendBatch.Queue(SendPing(p.ipv4conn, p.timeout, seq, target.Addr))
+						} else {
+							sendBatch.Queue(SendPing(p.ipv6conn, p.timeout, seq, target.Addr))
+						}
+					}
+				}
+				sendBatch.QueueComplete()
+			}()
 
 			// For each successfully sent echo request
 			for result := range sendBatch.Results() {
@@ -212,10 +229,13 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 				info := result.Value().(*PingInfo)
 				if err := result.Error(); err != nil {
 					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
-					state.MU.Lock()
-					delete(state.Pings, info.Seq)
-					state.MU.Unlock()
+					// req := stpool.Queue(state.DelPing(info.Seq))
+					// req.Wait()
+					// if err := req.Error(); err != nil {
+					// 	logp.Err("Error: Removing %v from state", req.Value().(int))
+					// } else {
 					go p.ProcessError(info.Target, "Send failed")
+					// }
 				} else {
 					// Queue a reciever
 					if net.ParseIP(info.Target).To4() != nil {
@@ -231,10 +251,13 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 					recv := result.Value().(*PingInfo)
 					if err := result.Error(); err != nil {
 						logp.Debug("pingbeat", "Recv unsuccessful: %v", err)
-						state.MU.Lock()
-						delete(state.Pings, recv.Seq)
-						state.MU.Unlock()
+						// req := stpool.Queue(state.DelPing(recv.Seq))
+						// req.Wait()
+						// if err := req.Error(); err != nil {
+						// 	logp.Err("Error: Removing %v from state", req.Value().(int))
+						// } else {
 						go p.ProcessError(recv.Target, "Receive failed")
+						// }
 					} else {
 						// Grab info of the received reply
 						ping := result.Value().(*PingInfo)
@@ -242,19 +265,18 @@ func (p *Pingbeat) Run(b *beat.Beat) error {
 						if ping.Loss {
 							logp.Debug("pingbeat", "ICMP Error for Target %v: %v", ping.Target, ping.LossReason)
 						} else {
-							if state.Pings[ping.Seq] != nil {
-								rtt := time.Since(state.Pings[ping.Seq].Sent)
-								state.MU.Lock()
-								delete(state.Pings, ping.Seq)
-								state.MU.Unlock()
-								go p.ProcessPing(ping.Target, rtt)
+							req := stpool.Queue(state.CalcPingRTT(ping.Seq))
+							req.Wait()
+							if err := req.Error(); err != nil {
+								logp.Debug("pingbeat", "Recieve error: %v", err)
 							} else {
-								logp.Debug("pingbeat", "Got a ping response that we aren't tracking: %v, %v", ping.Target, ping.Seq)
+								go p.ProcessPing(ping.Target, req.Value().(time.Duration))
 							}
 						}
 					}
 				}
 			}()
+
 		}
 	}
 }
@@ -382,34 +404,6 @@ func (p *Pingbeat) ProcessError(target string, error string) {
 		"reason":      error,
 	}
 	p.events.PublishEvent(event)
-}
-
-func (p *Pingbeat) CleanStalePings(state *PingState) {
-	for seq_no, details := range state.Pings {
-		if state.Pings[seq_no].Sent.Add(p.timeout).Before(time.Now()) {
-			logp.Debug("pingbeat", "CleanStalePings: Removing Packet (Seq ID: %v) for %v", seq_no, details.Target)
-			state.MU.Lock()
-			delete(state.Pings, seq_no)
-			state.MU.Unlock()
-		}
-	}
-}
-
-func (p *Pingbeat) QueueRequests(state *PingState, batch pool.Batch) {
-	for ip, target := range p.targets {
-		seq := state.GetSeqNo()
-		if net.ParseIP(ip).To4() != nil {
-			batch.Queue(SendPing(p.ipv4conn, p.timeout, seq, target.Addr))
-		} else {
-			batch.Queue(SendPing(p.ipv6conn, p.timeout, seq, target.Addr))
-		}
-		// Record the queued ping in the global ping state
-		state.MU.Lock()
-		state.Pings[seq] = NewPingRecord(ip)
-		state.MU.Unlock()
-
-	}
-	batch.QueueComplete()
 }
 
 func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Addr) pool.WorkFunc {
