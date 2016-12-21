@@ -1,7 +1,6 @@
 package pingbeat
 
 import (
-	"errors"
 	"github.com/elastic/beats/libbeat/logp"
 	"gopkg.in/go-playground/pool.v3"
 	"sync"
@@ -44,37 +43,14 @@ func (p *PingState) GetSeqNo() int {
 	return s
 }
 
-func (p *PingState) CalcPingRTT(seq int) pool.WorkFunc {
-	return func(wu pool.WorkUnit) (interface{}, error) {
-		if wu.IsCancelled() {
-			// return values not used
-			return nil, nil
-		}
-		p.MU.RLock()
-		defer p.MU.RUnlock()
-		if p.Pings[seq] != nil {
-			return time.Since(p.Pings[seq].Sent), nil
-		} else {
-			return nil, errors.New("Got a ping response that we aren't tracking")
-		}
+func (p *PingState) AddPing(target string, seq int, sent time.Time) bool {
+	p.MU.Lock()
+	p.Pings[seq] = &PingRecord{
+		Target: target,
+		Sent:   sent,
 	}
-}
-
-func (p *PingState) AddPing(target string) pool.WorkFunc {
-	return func(wu pool.WorkUnit) (interface{}, error) {
-		if wu.IsCancelled() {
-			// return values not used
-			return nil, nil
-		}
-		seq := p.GetSeqNo()
-		p.MU.Lock()
-		p.Pings[seq] = &PingRecord{
-			Target: target,
-			Sent:   time.Now().UTC(),
-		}
-		p.MU.Unlock()
-		return seq, nil
-	}
+	p.MU.Unlock()
+	return true
 }
 
 func (p *PingState) DelPing(seq int) pool.WorkFunc {
@@ -90,20 +66,24 @@ func (p *PingState) DelPing(seq int) pool.WorkFunc {
 	}
 }
 
-func (p *PingState) CleanPings(timeout time.Duration) pool.WorkFunc {
-	return func(wu pool.WorkUnit) (interface{}, error) {
-		if wu.IsCancelled() {
-			// return values not used
-			return nil, nil
+func (p *PingState) CalcPingRTT(seq int, received time.Time) time.Duration {
+	p.MU.RLock()
+	defer p.MU.RUnlock()
+	if p.Pings[seq] != nil {
+		return received.Sub(p.Pings[seq].Sent)
+	} else {
+		logp.Debug("pingstate", "Ping %v not found!", seq)
+		return 0
+	}
+}
+
+func (p *PingState) CleanPings(timeout time.Duration) {
+	p.MU.Lock()
+	defer p.MU.Unlock()
+	for seq, details := range p.Pings {
+		if p.Pings[seq].Sent.Add(timeout).Before(time.Now()) {
+			logp.Debug("pingstate", "CleanPings: Removing Packet (Seq ID: %v) for %v", seq, details.Target)
+			delete(p.Pings, seq)
 		}
-		p.MU.Lock()
-		for seq, details := range p.Pings {
-			if p.Pings[seq].Sent.Add(timeout).Before(time.Now()) {
-				logp.Debug("pingbeat", "CleanStalePings: Removing Packet (Seq ID: %v) for %v", seq, details)
-				delete(p.Pings, seq)
-			}
-		}
-		p.MU.Unlock()
-		return nil, nil
 	}
 }
