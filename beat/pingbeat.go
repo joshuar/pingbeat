@@ -290,16 +290,12 @@ func (p *Pingbeat) AddTarget(target string, tag string) {
 // Addr2Name takes a address as a string and returns the name and tag
 // associated with that address in the Pingbeat struct
 func (p *Pingbeat) FetchDetails(t string) (string, string) {
-	var name, tag string
 	if _, found := p.targets[t]; found {
-		name = p.targets[t].Name
-		tag = p.targets[t].Tag
+		return p.targets[t].Name, p.targets[t].Tag
 	} else {
 		logp.Err("Error: %s not found in Pingbeat targets!", t)
-		name = "err"
-		tag = "err"
+		return "err", "err"
 	}
-	return name, tag
 }
 
 // FetchIPs takes a target hostname, resolves the IP addresses for that
@@ -327,29 +323,37 @@ func FetchIPs(ip4addr, ip6addr chan string, target string) {
 
 func (p *Pingbeat) ProcessPing(ping *PingInfo) {
 	name, tag := p.FetchDetails(ping.Target)
-	event := common.MapStr{
-		"@timestamp":  common.Time(time.Now().UTC()),
-		"type":        "pingbeat",
-		"target_name": name,
-		"target_addr": ping.Target,
-		"tag":         tag,
-		"rtt":         milliSeconds(ping.RTT),
+	if name == "err" {
+		logp.Err("No details for %v in targets!", ping.Target)
+	} else {
+		event := common.MapStr{
+			"@timestamp":  common.Time(time.Now().UTC()),
+			"type":        "pingbeat",
+			"target_name": name,
+			"target_addr": ping.Target,
+			"tag":         tag,
+			"rtt":         milliSeconds(ping.RTT),
+		}
+		p.events.PublishEvent(event)
 	}
-	p.events.PublishEvent(event)
 }
 
 func (p *Pingbeat) ProcessError(target string, error string) {
 	name, tag := p.FetchDetails(target)
-	event := common.MapStr{
-		"@timestamp":  common.Time(time.Now().UTC()),
-		"type":        "pingbeat",
-		"target_name": name,
-		"target_addr": target,
-		"tag":         tag,
-		"loss":        true,
-		"reason":      error,
+	if name == "err" {
+		logp.Err("No details for %v in targets!", target)
+	} else {
+		event := common.MapStr{
+			"@timestamp":  common.Time(time.Now().UTC()),
+			"type":        "pingbeat",
+			"target_name": name,
+			"target_addr": target,
+			"tag":         tag,
+			"loss":        true,
+			"reason":      error,
+		}
+		p.events.PublishEvent(event)
 	}
-	p.events.PublishEvent(event)
 }
 
 func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Addr) pool.WorkFunc {
@@ -381,7 +385,7 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 				Data: []byte("pingbeat: y'know, for pings"),
 			},
 		}
-		logp.Debug("pingbeat", "Echo request %v: %v", seq, id, addr)
+		logp.Debug("pingbeat", "Echo request %v: %v", seq, addr.String())
 		// Marshall the Echo request for sending via a connection
 		binary, err := message.Marshal(nil)
 		if err != nil {
