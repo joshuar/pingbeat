@@ -62,7 +62,6 @@ func New() *Pingbeat {
 // configuration parameters and setting default values where needed
 func (p *Pingbeat) Config(b *beat.Beat) error {
 	createConn := func(n string, a string) (*icmp.PacketConn, error) {
-		logp.Info("%v, %v", n, a)
 		c, err := icmp.ListenPacket(n, a)
 		if err != nil {
 			return nil, err
@@ -90,10 +89,10 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		logp.Warn("Config: No period set. Setting to default 10s")
 		p.period = 10 * time.Second
 	}
-	logp.Debug("pingbeat", "Period %v\n", p.period)
+	logp.Info("Ping period: %v\n", p.period)
 
 	p.timeout = 10 * p.period
-	logp.Debug("pingbeat", "Timeout %v\n", p.timeout)
+	logp.Info("Ping timeout: %v\n", p.timeout)
 
 	// Check if we can use privileged (i.e. raw socket) ping,
 	// else use a UDP ping
@@ -108,7 +107,6 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 		p.ipv4network = "udp4"
 		p.ipv6network = "udp6"
 	}
-	logp.Debug("pingbeat", "Using %v and/or %v for pings\n", p.ipv4network, p.ipv6network)
 
 	// Check whether IPv4/IPv6 pings are requested in config
 	if &p.config.Input.UseIPv4 == nil && &p.config.Input.UseIPv6 == nil {
@@ -129,19 +127,25 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 			return err
 		}
 	}
-	logp.Debug("pingbeat", "Using IPv4: %v. Using IPv6: %v\n", p.useIPv4, p.useIPv6)
+	logp.Info("Using IPv4: %v. Using IPv6: %v\n", p.useIPv4, p.useIPv6)
 
 	// Fill the IPv4/IPv6 targets maps
 	p.targets = make(map[string]Target)
-	if p.config.Input.Targets != nil {
-		for tag, targets := range *p.config.Input.Targets {
-			for i := 0; i < len(targets); i++ {
-				p.AddTarget(targets[i], tag)
-			}
-		}
-	} else {
+	if p.config.Input.Targets == nil {
 		err := errors.New("No targets specified, cannot continue!")
 		return err
+	}
+	t := pool.New()
+	defer t.Close()
+
+	for tag, targets := range *p.config.Input.Targets {
+		for i := 0; i < len(targets); i++ {
+			work := t.Queue(p.AddTarget(targets[i], tag))
+			work.Wait()
+			if err := work.Error(); err != nil {
+				logp.Err("Failed to add target %v!", work.Value().(string))
+			}
+		}
 	}
 	// Check and load the GeoIP database
 	if p.config.Input.GeoIPDB != nil {
@@ -154,6 +158,71 @@ func (p *Pingbeat) Config(b *beat.Beat) error {
 	}
 
 	return nil
+}
+
+// AddTarget takes a target name and tag, fetches the IP addresses associated
+// with it and adds them to the Pingbeat struct
+func (p *Pingbeat) AddTarget(target string, tag string) pool.WorkFunc {
+	return func(wu pool.WorkUnit) (interface{}, error) {
+		if wu.IsCancelled() {
+			// return values not used
+			return nil, nil
+		}
+		if net.ParseIP(target) != nil {
+			// Input is already an IP address, add it directly
+			switch p.ipv4network[:2] {
+			case "ip":
+				p.targets[target] = Target{
+					Addr: &net.IPAddr{IP: net.ParseIP(target)},
+					Name: target,
+					Tag:  tag,
+				}
+			default:
+				p.targets[target] = Target{
+					Addr: &net.UDPAddr{IP: net.ParseIP(target)},
+					Name: target,
+					Tag:  tag,
+				}
+			}
+			logp.Debug("pingbeat", "Adding target %s\n", target)
+			return true, nil
+		} else {
+			// Input is a hostname, look up IP addrs and add
+			addrs, err := net.LookupIP(target)
+			if err != nil {
+				err := errors.New(target)
+				return false, err
+			} else {
+				for j := 0; j < len(addrs); j++ {
+					// If we have an IPv4 address and we aren't using IPv4, ignore
+					if addrs[j].To4() != nil && !p.useIPv4 {
+						break
+					}
+					// If we have an IPv6 address and we aren't using IPv6, ignore
+					if addrs[j].To4() == nil && !p.useIPv6 {
+						break
+					}
+					addrString := addrs[j].String()
+					logp.Debug("pingbeat", "Target %s has an address %s\n", target, addrString)
+					switch p.ipv4network[:2] {
+					case "ip":
+						p.targets[addrString] = Target{
+							Addr: &net.IPAddr{IP: net.ParseIP(addrString)},
+							Name: target,
+							Tag:  tag,
+						}
+					default:
+						p.targets[addrString] = Target{
+							Addr: &net.UDPAddr{IP: net.ParseIP(addrString)},
+							Name: target,
+							Tag:  tag,
+						}
+					}
+				}
+				return true, nil
+			}
+		}
+	}
 }
 
 // Setup performs boilerplate Beats setup
@@ -235,58 +304,6 @@ func (p *Pingbeat) Stop() {
 	close(p.done)
 }
 
-// AddTarget takes a target name and tag, fetches the IP addresses associated
-// with it and adds them to the Pingbeat struct
-func (p *Pingbeat) AddTarget(target string, tag string) {
-	string2addr := func(t string) net.Addr {
-		switch p.ipv4network[:2] {
-		case "ip":
-			return &net.IPAddr{IP: net.ParseIP(t)}
-		default:
-			return &net.UDPAddr{IP: net.ParseIP(t)}
-		}
-	}
-
-	if net.ParseIP(target) != nil {
-		p.targets[target] = Target{
-			Addr: string2addr(target),
-			Name: target,
-			Tag:  tag,
-		}
-	} else {
-		ip4addr := make(chan string)
-		ip6addr := make(chan string)
-		go FetchIPs(ip4addr, ip6addr, target)
-	lookup:
-		for {
-			select {
-			case ip := <-ip4addr:
-				if ip == "done" {
-					break lookup
-				} else if p.useIPv4 {
-					p.targets[ip] = Target{
-						Addr: string2addr(ip),
-						Name: target,
-						Tag:  tag,
-					}
-					logp.Debug("pingbeat", "Target %s has an IPv4 address %s\n", target, ip)
-				}
-			case ip := <-ip6addr:
-				if ip == "done" {
-					break lookup
-				} else if p.useIPv6 {
-					p.targets[ip] = Target{
-						Addr: string2addr(ip),
-						Name: target,
-						Tag:  tag,
-					}
-					logp.Debug("pingbeat", "Target %s has an IPv6 address %s\n", target, ip)
-				}
-			}
-		}
-	}
-}
-
 // Addr2Name takes a address as a string and returns the name and tag
 // associated with that address in the Pingbeat struct
 func (p *Pingbeat) FetchDetails(t string) (string, string) {
@@ -296,29 +313,6 @@ func (p *Pingbeat) FetchDetails(t string) (string, string) {
 		logp.Err("Error: %s not found in Pingbeat targets!", t)
 		return "err", "err"
 	}
-}
-
-// FetchIPs takes a target hostname, resolves the IP addresses for that
-// hostname via DNS and returns the results through the ip4addr/ip6addr
-// channels
-func FetchIPs(ip4addr, ip6addr chan string, target string) {
-	addrs, err := net.LookupIP(target)
-	if err != nil {
-		logp.Warn("Failed to resolve %s to IP address, ignoring this target.\n", target)
-	} else {
-		for j := 0; j < len(addrs); j++ {
-			if addrs[j].To4() != nil {
-				ip4addr <- addrs[j].String()
-			} else {
-				ip6addr <- addrs[j].String()
-			}
-		}
-	}
-	ip4addr <- "done"
-	close(ip4addr)
-	ip6addr <- "done"
-	close(ip6addr)
-	return
 }
 
 func (p *Pingbeat) ProcessPing(ping *PingInfo) {
@@ -334,6 +328,7 @@ func (p *Pingbeat) ProcessPing(ping *PingInfo) {
 			"tag":         tag,
 			"rtt":         milliSeconds(ping.RTT),
 		}
+		logp.Debug("pingbeat", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
 		p.events.PublishEvent(event)
 	}
 }
@@ -385,7 +380,6 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 				Data: []byte("pingbeat: y'know, for pings"),
 			},
 		}
-		logp.Debug("pingbeat", "Echo request %v: %v", seq, addr.String())
 		// Marshall the Echo request for sending via a connection
 		binary, err := message.Marshal(nil)
 		if err != nil {
@@ -497,7 +491,6 @@ func RecvPings(p *Pingbeat, state *PingState, conn *icmp.PacketConn) {
 			ping.Target = target
 			ping.Loss = false
 			ping.Received = time.Now().UTC()
-			logp.Debug("pingbeat", "Echo Reply %v: %v", ping.Seq, ping.Target)
 		default:
 			// err := errors.New("Unknown ICMP Packet")
 		}
