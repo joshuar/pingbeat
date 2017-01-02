@@ -1,0 +1,64 @@
+{
+    "template": "pingbeat-*",
+    "mappings": {
+        "_default_": {
+            "_all": {
+                "norms": {
+                    "enabled": false
+                }
+            },
+            "_meta": {
+                "version": "1.0-beta1"
+            },
+            "properties": {
+                "beat": {
+                    "properties": {
+                        "hostname": {
+                            "ignore_above": 1024,
+                            "type": "string",
+                            "index": "not_analyzed"
+                        },
+                        "name": {
+                            "ignore_above": 1024,
+                            "type": "string",
+                            "index": "not_analyzed"
+                        },
+                        "version": {
+                            "ignore_above": 1024,
+                            "index": "not_analyzed",
+                            "type": "string"
+                        }
+                    }
+                },
+                "@timestamp": {
+                    "type": "date"
+                },
+                "loss": {
+                    "type": "boolean"
+                },
+                "rtt": {
+                    "type": "double"
+                },
+                "target_name": {
+                    "index": "analyzed",
+                    "type": "string",
+                    "fields": {
+                        "raw": {
+                            "index": "not_analyzed",
+                            "type": "string"
+                        }
+                    }
+                },
+                "target_addr": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "tag": {
+                    "ignore_above": 256,
+                    "index": "not_analyzed",
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
