@@ -15,11 +15,11 @@
                     "properties": {
                         "hostname": {
                             "ignore_above": 1024,
-                            "type": "keyword",
+                            "type": "keyword"
                         },
                         "name": {
                             "ignore_above": 1024,
-                            "type": "keyword",
+                            "type": "keyword"
                         },
                         "version": {
                             "ignore_above": 1024,
