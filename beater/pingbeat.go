@@ -3,7 +3,7 @@ package beater
 import (
 	"errors"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
@@ -63,7 +63,6 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 
 	// Fill the IPv4/IPv6 targets maps
 	bt.targets = NewTargets(bt.config.Targets, bt.config.Privileged, bt.config.UseIPv4, bt.config.UseIPv6)
-	spew.Dump(bt.targets)
 	return bt, nil
 }
 
@@ -300,7 +299,6 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 			return ping, err
 		} else {
 			if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-				spew.Dump(ping)
 				return ping, err
 			}
 			ping.Sent = time.Now().UTC()
