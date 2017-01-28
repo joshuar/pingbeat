@@ -1,5 +1,0 @@
-<directory name="pingbeat" rev="1" srcmd5="b226ef5024a9811dc59666a94312013d" vrev="1">
-  <serviceinfo code="succeeded" xsrcmd5="74d3098f7fdf6414e603b8781eba8999" />
-  <entry md5="92390d22a687ac6994eff3753213c321" mtime="1468117290" name="_service" size="199" />
-  <entry md5="bf8b0c3200c57f4a5d6b904c03c39dc0" mtime="1468117292" name="pingbeat.spec" size="2476" />
-</directory>

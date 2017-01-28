@@ -1,12 +1,20 @@
+build
+_meta/kibana
+_meta/module.generated
+/tests/load/logs
+/docs/html_docs
+
 /vendor/**/.git*
 
 # Test binaries and config files
-pingbeat
-pingbeat*.yml
+/pingbeat
+/pingbeat.test
+/_meta/pingbeat.dev.yml
 *.prof
 
 # Glide stuff
 glide
+glide.yaml.bkup
 
 # Directories
 /.vagrant
@@ -21,6 +29,7 @@ _test
 /glide.lock
 /beats.iml
 *.dev.yml
+*.pyc
 
 # Editor swap files
 *.swp

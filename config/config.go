@@ -1,14 +1,23 @@
 package config
 
-type PingConfig struct {
-	Period     *string
-	GeoIPDB    *string
-	UseIPv4    *bool
-	UseIPv6    *bool
-	Privileged *bool
-	Targets    *map[string][]string
+import (
+	"github.com/elastic/beats/libbeat/common"
+	"time"
+)
+
+type Config struct {
+	Period     time.Duration    `config:"period"`
+	Timeout    time.Duration    `config:"timeout"`
+	Privileged bool             `config:"privileged"`
+	UseIPv4    bool             `config:"useipv4"`
+	UseIPv6    bool             `config:"useipv6"`
+	Targets    []*common.Config `config:"targets"`
 }
 
-type ConfigSettings struct {
-	Input PingConfig
+var DefaultConfig = Config{
+	Period:     1 * time.Second,
+	Timeout:    10 * time.Second,
+	Privileged: true,
+	UseIPv4:    true,
+	UseIPv6:    true,
 }

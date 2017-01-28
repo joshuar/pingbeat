@@ -1,0 +1,13 @@
+################### Pingbeat Configuration Example #########################
+
+############################# Pingbeat ######################################
+
+pingbeat:
+  # Defines how often a ping is sent to a target
+  period: 1s
+  # Whether to send pings over IPv4
+  useIPv4: true
+  # Whether to send pings over IPv6
+  useIPv6: true
+  # How long to wait for a target to respond to a ping request
+  timeout: 10s

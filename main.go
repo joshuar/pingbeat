@@ -1,17 +1,16 @@
 package main
 
 import (
-	"github.com/elastic/beats/libbeat/beat"
-	pingbeat "github.com/joshuar/pingbeat/beat"
 	"os"
+
+	"github.com/elastic/beats/libbeat/beat"
+
+	"github.com/joshuar/pingbeat/beater"
 )
 
-// You can overwrite these, e.g.: go build -ldflags "-X main.Version 1.0.0-beta3"
-var Version = "1.0-beta1"
-var Name = "pingbeat"
-
 func main() {
-	if err := beat.Run(Name, Version, pingbeat.New()); err != nil {
+	err := beat.Run("pingbeat", "", beater.New)
+	if err != nil {
 		os.Exit(1)
 	}
 }
