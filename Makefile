@@ -20,7 +20,8 @@ setup: copy-vendor
 
 # Copy beats into vendor directory
 .PHONY: copy-vendor
-copy-vendor:
+copy-vendor: glide
+	./glide install
 	mkdir -p vendor/github.com/elastic/
 	cp -R ${BEAT_GOPATH}/src/github.com/elastic/beats vendor/github.com/elastic/
 	rm -rf vendor/github.com/elastic/beats/.git
@@ -47,9 +48,6 @@ before-build:
 # Collects all dependencies and then calls update
 .PHONY: collect
 collect:
-
-deps: glide
-	./glide install
 
 glide:
 ifeq ($(shell uname),Darwin)

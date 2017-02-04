@@ -35,8 +35,12 @@
             }
           }
         },
-        "counter": {
-          "type": "long"
+        "description": {
+          "norms": false,
+          "type": "text"
+        },
+        "fields": {
+          "properties": {}
         },
         "meta": {
           "properties": {
@@ -70,9 +74,24 @@
             }
           }
         },
+        "rtt": {
+          "type": "double"
+        },
+        "tag": {
+          "ignore_above": 1024,
+          "type": "keyword"
+        },
         "tags": {
           "ignore_above": 1024,
           "type": "keyword"
+        },
+        "target_addr": {
+          "ignore_above": 1024,
+          "type": "keyword"
+        },
+        "target_name": {
+          "norms": false,
+          "type": "text"
         }
       }
     }
