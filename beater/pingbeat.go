@@ -179,7 +179,7 @@ func RecvPings(bt *Pingbeat, state *PingState, conn *icmp.PacketConn) {
 		if err != nil {
 			binary = nil
 			logp.Err("Couldn't read from connection: %v", err)
-			break
+			continue
 		}
 		var target string
 		switch peer.(type) {
@@ -189,17 +189,17 @@ func RecvPings(bt *Pingbeat, state *PingState, conn *icmp.PacketConn) {
 			target = peer.String()
 		default:
 			logp.Err("Error parsing received address %v", target)
-			break
+			continue
 		}
 
 		if n == 0 {
-			break
+			continue
 		}
 		// Parse the data into an ICMP message
 		message, err := icmp.ParseMessage(ping_type.Protocol(), binary[:n])
 		if err != nil {
 			logp.Err("Couldn't parse response: %v", err)
-			break
+			continue
 		}
 
 		ping := &PingInfo{}
