@@ -72,7 +72,7 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 	bt.client = b.Publisher.Connect()
 
 	// Set up send/receive pools
-	spool := pool.NewLimited(100)
+	spool := pool.NewLimited(uint(len(bt.targets)) * uint(bt.config.Timeout.Seconds()))
 	defer spool.Close()
 
 	// Set up a ticker to loop for the period specified
@@ -90,7 +90,7 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 	var err error
 	if bt.config.UseIPv4 {
 		if ipv4conn, err = createConn(bt.ipv4network, "0.0.0.0"); err != nil {
-			fmt.Errorf("Error creating %s connection: %v", bt.ipv4network, err)
+			logp.Err("Error creating %s connection: %v", bt.ipv4network, err)
 			return nil
 		}
 		logp.Info("Using %s connection", bt.ipv4network)
@@ -98,7 +98,7 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 	}
 	if bt.config.UseIPv6 {
 		if ipv6conn, err = createConn(bt.ipv6network, "::"); err != nil {
-			fmt.Errorf("Error creating %s connection: %v", bt.ipv6network, err)
+			logp.Err("Error creating %s connection: %v", bt.ipv6network, err)
 			return nil
 		}
 		logp.Info("Using %s connection", bt.ipv6network)
@@ -309,17 +309,19 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 
 // FetchDetails takes a address as a string and returns the name and tag
 // associated with that address in the Pingbeat struct
-func (bt *Pingbeat) FetchDetails(t string) (string, string) {
+func (bt *Pingbeat) FetchDetails(t string) (string, []string) {
 	if _, found := bt.targets[t]; found {
-		return bt.targets[t].Name, bt.targets[t].Tag
+		return bt.targets[t].Name, bt.targets[t].Tags
 	} else {
 		logp.Err("Error: %s not found in Pingbeat targets!", t)
-		return "err", "err"
+		var tags []string
+		tags[0] = fmt.Sprintf("Error: %s not found in Pingbeat targets!", t)
+		return t, tags
 	}
 }
 
 func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
-	name, tag := bt.FetchDetails(ping.Target)
+	name, tags := bt.FetchDetails(ping.Target)
 	if name == "err" {
 		logp.Err("No details for %v in targets!", ping.Target)
 	} else {
@@ -328,7 +330,7 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 			"type":        "pingbeat",
 			"target_name": name,
 			"target_addr": ping.Target,
-			"tag":         tag,
+			"target_tags": tags,
 			"rtt":         milliSeconds(ping.RTT),
 		}
 		logp.Debug("pingbeat", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
@@ -337,7 +339,7 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 }
 
 func (bt *Pingbeat) ProcessError(target string, error string) {
-	name, tag := bt.FetchDetails(target)
+	name, tags := bt.FetchDetails(target)
 	if name == "err" {
 		logp.Err("No details for %v in targets!", target)
 	} else {
@@ -346,7 +348,7 @@ func (bt *Pingbeat) ProcessError(target string, error string) {
 			"type":        "pingbeat",
 			"target_name": name,
 			"target_addr": target,
-			"tag":         tag,
+			"target_tags": tags,
 			"loss":        true,
 			"reason":      error,
 		}

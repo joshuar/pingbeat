@@ -20,11 +20,8 @@ setup: copy-vendor
 
 # Copy beats into vendor directory
 .PHONY: copy-vendor
-copy-vendor: glide
-	./glide install
-	mkdir -p vendor/github.com/elastic/
-	cp -R ${BEAT_GOPATH}/src/github.com/elastic/beats vendor/github.com/elastic/
-	rm -rf vendor/github.com/elastic/beats/.git
+copy-vendor:
+	glide install
 
 .PHONY: git-init
 git-init:
@@ -48,18 +45,3 @@ before-build:
 # Collects all dependencies and then calls update
 .PHONY: collect
 collect:
-
-glide:
-ifeq ($(shell uname),Darwin)
-	curl -L https://github.com/Masterminds/glide/releases/download/v$(GLIDE_VERSION)/glide-v$(GLIDE_VERSION)-darwin-amd64.zip -o glide.zip
-	unzip glide.zip
-	mv ./darwin-amd64/glide ./glide
-	rm -fr ./darwin-amd64
-	rm ./glide.zip
-else
-	curl -L https://github.com/Masterminds/glide/releases/download/v$(GLIDE_VERSION)/glide-v$(GLIDE_VERSION)-linux-amd64.zip -o glide.zip
-	unzip glide.zip
-	mv ./linux-amd64/glide ./glide
-	rm -fr ./linux-amd64
-	rm ./glide.zip
-endif

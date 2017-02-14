@@ -129,21 +129,13 @@ Pingbeat specific fields
 
 
 [float]
-=== rtt
-
-type: double
-
-required: True
-
-Round trip time in milliseconds
-
-
-[float]
-=== tag
+=== target_addr
 
 type: keyword
 
-Tag assigned to this target
+required: True
+
+IP address of target
 
 
 [float]
@@ -155,17 +147,25 @@ DNS name of target (for searches)
 
 
 [float]
-=== target_addr
+=== rtt
 
-type: keyword
+type: double
 
 required: True
 
-IP address of target
+Round trip time in milliseconds
 
 
 [float]
-=== description
+=== target_tags
+
+type: keyword
+
+Tag assigned to this target
+
+
+[float]
+=== target_description
 
 type: text
 

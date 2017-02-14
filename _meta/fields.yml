@@ -4,25 +4,25 @@
     Pingbeat specific fields
   fields:
 
-    - name: rtt
-      type: double
-      required: true
-      description: >
-        Round trip time in milliseconds
-    - name: tag
-      type: keyword
-      description: >
-        Tag assigned to this target
-    - name: target_name
-      type: text
-      description: >
-        DNS name of target (for searches)
     - name: target_addr
       required: true
       type: keyword
       description: >
         IP address of target
-    - name: description
+    - name: target_name
+      type: text
+      description: >
+        DNS name of target (for searches)
+    - name: rtt
+      type: double
+      required: true
+      description: >
+        Round trip time in milliseconds
+    - name: target_tags
+      type: keyword
+      description: >
+        Tag assigned to this target
+    - name: target_description
       type: text
       description: >
         Long form free text describing this particular target

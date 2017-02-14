@@ -7,8 +7,9 @@
         }
       },
       "_meta": {
-        "version": "6.0.0-alpha1"
+        "version": "5.3.0"
       },
+      "date_detection": false,
       "dynamic_templates": [
         {
           "strings_as_keyword": {
@@ -43,13 +44,6 @@
               "type": "string"
             }
           }
-        },
-        "description": {
-          "index": "analyzed",
-          "norms": {
-            "enabled": false
-          },
-          "type": "string"
         },
         "fields": {
           "properties": {}
@@ -95,11 +89,6 @@
         "rtt": {
           "type": "double"
         },
-        "tag": {
-          "ignore_above": 1024,
-          "index": "not_analyzed",
-          "type": "string"
-        },
         "tags": {
           "ignore_above": 1024,
           "index": "not_analyzed",
@@ -110,11 +99,23 @@
           "index": "not_analyzed",
           "type": "string"
         },
+        "target_description": {
+          "index": "analyzed",
+          "norms": {
+            "enabled": false
+          },
+          "type": "string"
+        },
         "target_name": {
           "index": "analyzed",
           "norms": {
             "enabled": false
           },
+          "type": "string"
+        },
+        "target_tags": {
+          "ignore_above": 1024,
+          "index": "not_analyzed",
           "type": "string"
         }
       }

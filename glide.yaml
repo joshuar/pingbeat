@@ -1,6 +1,6 @@
 package: github.com/joshuar/pingbeat
 ignore:
-- github.com/elastic/beats
+  - plugin
 import:
 - package: golang.org/x/net
   subpackages:
@@ -12,3 +12,10 @@ import:
 - package: github.com/davecgh/go-spew
   subpackages:
   - spew
+- package: github.com/elastic/beats/libbeat
+  version: ^5.0.0
+  subpackages:
+  - beat
+  - common
+  - publisher
+  - cfgfile

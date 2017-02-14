@@ -1,9 +1,13 @@
 {
   "mappings": {
     "_default_": {
-      "_meta": {
-        "version": "6.0.0-alpha1"
+      "_all": {
+        "norms": false
       },
+      "_meta": {
+        "version": "5.3.0"
+      },
+      "date_detection": false,
       "dynamic_templates": [
         {
           "strings_as_keyword": {
@@ -34,10 +38,6 @@
               "type": "keyword"
             }
           }
-        },
-        "description": {
-          "norms": false,
-          "type": "text"
         },
         "fields": {
           "properties": {}
@@ -77,10 +77,6 @@
         "rtt": {
           "type": "double"
         },
-        "tag": {
-          "ignore_above": 1024,
-          "type": "keyword"
-        },
         "tags": {
           "ignore_above": 1024,
           "type": "keyword"
@@ -89,9 +85,17 @@
           "ignore_above": 1024,
           "type": "keyword"
         },
+        "target_description": {
+          "norms": false,
+          "type": "text"
+        },
         "target_name": {
           "norms": false,
           "type": "text"
+        },
+        "target_tags": {
+          "ignore_above": 1024,
+          "type": "keyword"
         }
       }
     }

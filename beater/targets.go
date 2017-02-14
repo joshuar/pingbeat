@@ -2,6 +2,7 @@ package beater
 
 import (
 	"errors"
+	// "github.com/davecgh/go-spew/spew"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"gopkg.in/go-playground/pool.v3"
@@ -11,14 +12,14 @@ import (
 type Target struct {
 	Addr net.Addr
 	Name string
-	Tag  string
+	Tags []string
 	Desc string
 }
 
 type targetConfig struct {
-	Name string `config:"name"`
-	Tag  string `config:"tag"`
-	Desc string `config:"desc"`
+	Name string   `config:"name"`
+	Tags []string `config:"tags"`
+	Desc string   `config:"desc"`
 }
 
 func NewTargets(cfg []*common.Config, privileged bool, ipv4 bool, ipv6 bool) map[string]Target {
@@ -34,9 +35,10 @@ func NewTargets(cfg []*common.Config, privileged bool, ipv4 bool, ipv6 bool) map
 			work := t.Queue(AddTarget(target, privileged, ipv4, ipv6))
 			work.Wait()
 			if err := work.Error(); err != nil {
-				logp.Err("Failed to add target %v!", work.Value().(Target).Name)
+				logp.Err("Failed to add target %v!", work.Value().(*Target).Name)
 			} else {
-				targets[work.Value().(Target).Addr.String()] = work.Value().(Target)
+				thisTarget := work.Value().(*Target)
+				targets[thisTarget.Addr.String()] = *thisTarget
 			}
 		}
 	}
@@ -51,29 +53,24 @@ func AddTarget(target *targetConfig, privileged bool, ipv4 bool, ipv6 bool) pool
 			// return values not used
 			return nil, nil
 		}
-		if net.ParseIP(target.Name) != nil {
+		t := &Target{
+			Name: target.Name,
+			Tags: target.Tags,
+			Desc: target.Desc,
+		}
+		if net.ParseIP(t.Name) != nil {
 			// Input is already an IP address, add it directly
-			logp.Debug("pingbeat", "Adding target %s\n", target.Name)
+			logp.Debug("pingbeat", "Adding target %s\n", t.Name)
 			if privileged {
-				return Target{
-					Addr: &net.IPAddr{IP: net.ParseIP(target.Name)},
-					Name: target.Name,
-					Tag:  target.Tag,
-					Desc: target.Desc,
-				}, nil
+				t.Addr = &net.IPAddr{IP: net.ParseIP(t.Name)}
 			} else {
-				return Target{
-					Addr: &net.UDPAddr{IP: net.ParseIP(target.Name)},
-					Name: target.Name,
-					Tag:  target.Tag,
-					Desc: target.Desc,
-				}, nil
+				t.Addr = &net.UDPAddr{IP: net.ParseIP(t.Name)}
 			}
 		} else {
 			// Input is a hostname, look up IP addrs and add
-			addrs, err := net.LookupIP(target.Name)
+			addrs, err := net.LookupIP(t.Name)
 			if err != nil {
-				err := errors.New(target.Name)
+				err := errors.New(t.Name)
 				return nil, err
 			} else {
 				for j := 0; j < len(addrs); j++ {
@@ -86,25 +83,15 @@ func AddTarget(target *targetConfig, privileged bool, ipv4 bool, ipv6 bool) pool
 						break
 					}
 					addrString := addrs[j].String()
-					logp.Debug("pingbeat", "Target %s has an address %s\n", target.Name, addrString)
+					logp.Debug("pingbeat", "Target %s has an address %s\n", t.Name, addrString)
 					if privileged {
-						return Target{
-							Addr: &net.IPAddr{IP: net.ParseIP(addrString)},
-							Name: target.Name,
-							Tag:  target.Tag,
-							Desc: target.Desc,
-						}, nil
+						t.Addr = &net.IPAddr{IP: net.ParseIP(addrString)}
 					} else {
-						return Target{
-							Addr: &net.UDPAddr{IP: net.ParseIP(addrString)},
-							Name: target.Name,
-							Tag:  target.Tag,
-							Desc: target.Desc,
-						}, nil
+						t.Addr = &net.UDPAddr{IP: net.ParseIP(addrString)}
 					}
 				}
 			}
 		}
-		return nil, nil
+		return t, nil
 	}
 }
