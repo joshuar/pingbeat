@@ -81,21 +81,24 @@
           "ignore_above": 1024,
           "type": "keyword"
         },
-        "target_addr": {
-          "ignore_above": 1024,
-          "type": "keyword"
-        },
-        "target_description": {
-          "norms": false,
-          "type": "text"
-        },
-        "target_name": {
-          "norms": false,
-          "type": "text"
-        },
-        "target_tags": {
-          "ignore_above": 1024,
-          "type": "keyword"
+        "target": {
+          "properties": {
+            "addr": {
+              "type": "ip"
+            },
+            "description": {
+              "norms": false,
+              "type": "text"
+            },
+            "name": {
+              "ignore_above": 1024,
+              "type": "keyword"
+            },
+            "tags": {
+              "ignore_above": 1024,
+              "type": "keyword"
+            }
+          }
         }
       }
     }

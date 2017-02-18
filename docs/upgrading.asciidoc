@@ -1,0 +1,66 @@
+[[pingbeat-upgrading]]
+== Upgrading
+
+[[pingbeat-upgrading-to-5x]]
+=== Upgrading to 5.x
+
+With Pingbeat 5.x and higher, the fields have changed names and structure.
+
+You can upgrade your existing indices to the new format (after loading
+the new http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/indices-templates.html[index
+template]) with a combination of an
+https://www.elastic.co/guide/en/elasticsearch/reference/current/ingest.html[Ingest
+Pipeline] and the https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-reindex.html[Reindex API].
+
+First, add a Ingest Pipeline to Elasticsearch as defined below:
+
+[source, json]
+-------------------------------------
+PUT _ingest/pipeline/pingbeat_upgrade
+{
+  "description": "upgrade pingbeat fields",
+  "processors": [
+    {
+      "rename": {
+        "field": "tag",
+        "target_field": "target.tags",
+        "ignore_missing": true
+      }
+    },
+    {
+      "rename": {
+        "field": "desc",
+        "target_field": "target.desc",
+        "ignore_missing": true
+      }
+    },
+    {
+      "rename": {
+        "field": "target_name",
+        "target_field": "target.name",
+        "ignore_missing": true
+      }
+    }
+  ]
+}
+-------------------------------------
+
+Now, for each index you want to upgrade, use the Reindex API as
+follows:
+
+[source, json]
+-------------------------------------
+POST _reindex?wait_for_completion=false
+{
+  "source": {
+    "index": "pingbeat-old"
+  },
+  "dest": {
+    "index": "pingbeat-new"
+  }
+}
+-------------------------------------
+
+Adjust the new and old index names as necessary.  The
+`wait_for_completion=false` parameter is optional, but allows you to
+start multiple reindex operations in parallel.

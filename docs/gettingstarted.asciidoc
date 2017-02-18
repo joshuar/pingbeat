@@ -8,7 +8,7 @@ Before starting Pingbeat, you'll need to edit the `pingbeat.yml`
 configuration file and add your targets and change any configuration
 options as described below.
 
-[source, shell]
+[source, yaml]
 -------------------------------------
 input:
   period: 10
@@ -16,10 +16,9 @@ input:
   useipv4: true
   useipv6: false
   targets:
-    tag:
-      - some.host
-      - other.host
-      - 1.2.3.4
+    - name: "127.0.0.1"
+      tags: "localhost"
+      desc: "there's no place like home"
 -------------------------------------
 
 `period` defines how often to send ping packets to all targets.
@@ -32,10 +31,10 @@ permissions can open raw sockets.
 `useipv4/useipv6` defines whether to send IPv4/v6 pings.  Toggle these
 depending on your network configuration.
 
-The target list is defined in a hierarchy under the `targets` key,
-listing a group of hosts under a specific `tag`.  The tag will be
-added to each ping response event recorded in the output.  A tag is
-currently mandatory.
+The target list is defined in a hierarchy under the
+`targets` key. Hosts are defined by a `name` (required, either a
+hostname or IP address), a list of tags and a description, the latter
+two being optional.
 
 Before starting Pingbeat, you need to load the
 http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/indices-templates.html[index
@@ -47,7 +46,7 @@ following command:
 
 [source,shell]
 ----------------------------------------------------------------------
-curl -XPUT 'http://localhost:9200/_template/pingbeat' -d@/path/to/pingbeat-template.json
+curl -XPUT 'http://localhost:9200/_template/pingbeat' -d@/path/to/pingbeat.template.json
 ----------------------------------------------------------------------
 
 // The recommended template file is installed by the Pingbeat packages. Load it with the

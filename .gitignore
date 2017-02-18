@@ -42,3 +42,4 @@ _test
 
 # Cross compile artifacts
 dist
+\#*

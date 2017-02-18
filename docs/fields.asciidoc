@@ -128,22 +128,39 @@ Pingbeat specific fields
 
 
 
-[float]
-=== target_addr
 
-type: keyword
+[float]
+=== target.addr
+
+type: ip
 
 required: True
 
-IP address of target
+IPv4/6 address of target
 
 
 [float]
-=== target_name
+=== target.name
+
+type: keyword
+
+DNS name of target
+
+
+[float]
+=== target.tags
+
+type: keyword
+
+Tags assigned to this target
+
+
+[float]
+=== target.description
 
 type: text
 
-DNS name of target (for searches)
+Long, free form text describing this particular target
 
 
 [float]
@@ -154,21 +171,5 @@ type: double
 required: True
 
 Round trip time in milliseconds
-
-
-[float]
-=== target_tags
-
-type: keyword
-
-Tag assigned to this target
-
-
-[float]
-=== target_description
-
-type: text
-
-Long form free text describing this particular target
 
 

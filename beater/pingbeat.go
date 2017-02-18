@@ -328,9 +328,9 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 		event := common.MapStr{
 			"@timestamp":  common.Time(time.Now().UTC()),
 			"type":        "pingbeat",
-			"target_name": name,
-			"target_addr": ping.Target,
-			"target_tags": tags,
+			"target.name": name,
+			"target.addr": ping.Target,
+			"target.tags": tags,
 			"rtt":         milliSeconds(ping.RTT),
 		}
 		logp.Debug("pingbeat", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
@@ -346,9 +346,9 @@ func (bt *Pingbeat) ProcessError(target string, error string) {
 		event := common.MapStr{
 			"@timestamp":  common.Time(time.Now().UTC()),
 			"type":        "pingbeat",
-			"target_name": name,
-			"target_addr": target,
-			"target_tags": tags,
+			"target.name": name,
+			"target.addr": target,
+			"target.tags": tags,
 			"loss":        true,
 			"reason":      error,
 		}

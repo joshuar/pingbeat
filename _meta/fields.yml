@@ -1,28 +1,31 @@
+
 - key: pingbeat
   title: pingbeat
   description: >
     Pingbeat specific fields
   fields:
-
-    - name: target_addr
-      required: true
-      type: keyword
-      description: >
-        IP address of target
-    - name: target_name
-      type: text
-      description: >
-        DNS name of target (for searches)
+    - name: target
+      type: group
+      fields:
+        - name: addr
+          required: true
+          type: ip
+          description: >
+            IPv4/6 address of target
+        - name: name
+          type: keyword
+          description: >
+            DNS name of target
+        - name: tags
+          type: keyword
+          description: >
+            Tags assigned to this target
+        - name: description
+          type: text
+          description: >
+            Long, free form text describing this particular target
     - name: rtt
       type: double
       required: true
       description: >
         Round trip time in milliseconds
-    - name: target_tags
-      type: keyword
-      description: >
-        Tag assigned to this target
-    - name: target_description
-      type: text
-      description: >
-        Long form free text describing this particular target

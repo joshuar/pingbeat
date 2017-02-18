@@ -3,3 +3,9 @@
 include::./overview.asciidoc[]
 
 include::./gettingstarted.asciidoc[]
+
+include::./command-line.asciidoc[]
+
+include::./upgrading.asciidoc[]
+
+include::./fields.asciidoc[]

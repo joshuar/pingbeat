@@ -1,0 +1,9 @@
+[[pingbeat-command-line]]
+=== Command Line Options
+
+Pingbeat does not have any Pingbeat-specific command line options.
+Instead, you configure the behaviour of Pingbeat by specifying options in
+the configuration file.
+
+TIP: Run `./pingbeat -h` to see the full list of options from the command
+line.
