@@ -1,10 +1,11 @@
 package beater
 
 import (
-	"github.com/elastic/beats/libbeat/logp"
-	"gopkg.in/go-playground/pool.v3"
 	"sync"
 	"time"
+
+	"github.com/elastic/beats/libbeat/logp"
+	"gopkg.in/go-playground/pool.v3"
 )
 
 type PingRecord struct {
@@ -71,10 +72,9 @@ func (p *PingState) CalcPingRTT(seq int, received time.Time) time.Duration {
 	defer p.MU.RUnlock()
 	if p.Pings[seq] != nil {
 		return received.Sub(p.Pings[seq].Sent)
-	} else {
-		logp.Debug("pingstate", "Ping %v not found!", seq)
-		return 0
 	}
+	logp.Debug("pingstate", "Ping %v not found!", seq)
+	return 0
 }
 
 func (p *PingState) CleanPings(timeout time.Duration) {

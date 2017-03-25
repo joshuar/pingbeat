@@ -2,11 +2,11 @@ package beater
 
 import (
 	"errors"
-	// "github.com/davecgh/go-spew/spew"
+	"net"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"gopkg.in/go-playground/pool.v3"
-	"net"
 )
 
 type Target struct {
@@ -38,7 +38,9 @@ func NewTargets(cfg []*common.Config, privileged bool, ipv4 bool, ipv6 bool) map
 				logp.Err("Failed to add target %v!", work.Value().(*Target).Name)
 			} else {
 				thisTarget := work.Value().(*Target)
-				targets[thisTarget.Addr.String()] = *thisTarget
+				if thisTarget.Addr != nil {
+					targets[thisTarget.Addr.String()] = *thisTarget
+				}
 			}
 		}
 	}
@@ -72,23 +74,29 @@ func AddTarget(target *targetConfig, privileged bool, ipv4 bool, ipv6 bool) pool
 			if err != nil {
 				err := errors.New(t.Name)
 				return nil, err
-			} else {
-				for j := 0; j < len(addrs); j++ {
-					// If we have an IPv4 address and we aren't using IPv4, ignore
-					if addrs[j].To4() != nil && !ipv4 {
-						break
-					}
-					// If we have an IPv6 address and we aren't using IPv6, ignore
-					if addrs[j].To4() == nil && !ipv6 {
-						break
-					}
-					addrString := addrs[j].String()
-					logp.Debug("pingbeat", "Target %s has an address %s\n", t.Name, addrString)
-					if privileged {
-						t.Addr = &net.IPAddr{IP: net.ParseIP(addrString)}
-					} else {
-						t.Addr = &net.UDPAddr{IP: net.ParseIP(addrString)}
-					}
+			}
+			for j := 0; j < len(addrs); j++ {
+				// If we have an IPv4 address and we aren't using IPv4, ignore
+				if addrs[j].To4() != nil && !ipv4 {
+					logp.Debug("pingbeat", "Ignoring IPv4 address %s for target %s as not using IPv4\n", addrs[j].String(), t.Name)
+					break
+				}
+				// If we have an IPv6 address and we aren't using IPv6, ignore
+				if addrs[j].To4() == nil && !ipv6 {
+					logp.Debug("pingbeat", "Ignoring IPv6 address %s for target %s as not using IPv6\n", addrs[j].String(), t.Name)
+					break
+				}
+				// If we get a loopback address, ignore it
+				if addrs[j].IsLoopback() {
+					logp.Warn("Target %s resolves to a loopback address? Not adding as target.\n", t.Name)
+					break
+				}
+				addrString := addrs[j].String()
+				logp.Debug("pingbeat", "Target %s has an address %s\n", t.Name, addrString)
+				if privileged {
+					t.Addr = &net.IPAddr{IP: net.ParseIP(addrString)}
+				} else {
+					t.Addr = &net.UDPAddr{IP: net.ParseIP(addrString)}
 				}
 			}
 		}
