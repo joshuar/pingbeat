@@ -73,7 +73,7 @@ func AddTarget(target *targetConfig, privileged bool, ipv4 bool, ipv6 bool) pool
 			addrs, err := net.LookupIP(t.Name)
 			if err != nil {
 				err := errors.New(t.Name)
-				return nil, err
+				return t, err
 			}
 			for j := 0; j < len(addrs); j++ {
 				// If we have an IPv4 address and we aren't using IPv4, ignore

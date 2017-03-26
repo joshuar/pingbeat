@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	// "github.com/davecgh/go-spew/spew"
+	"net"
+	"os"
+	"time"
+
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
@@ -13,9 +17,6 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"gopkg.in/go-playground/pool.v3"
-	"net"
-	"os"
-	"time"
 )
 
 type Pingbeat struct {
@@ -52,7 +53,7 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 	// Use privileged (i.e. raw socket) ping by default, else use a UDP ping
 	if bt.config.Privileged {
 		if os.Getuid() != 0 {
-			return nil, fmt.Errorf("Privileged specified but not running with privileges!")
+			return nil, fmt.Errorf("privileged specified but not running with privileges!")
 		}
 		bt.ipv4network = "ip4:icmp"
 		bt.ipv6network = "ip6:ipv6-icmp"
@@ -119,7 +120,6 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 			go func(*icmp.PacketConn, *icmp.PacketConn) {
 				for ip, target := range bt.targets {
 					if net.ParseIP(ip).To4() != nil {
-						logp.Debug("pingbeat", "Sending a ping")
 						sendBatch.Queue(SendPing(ipv4conn, bt.config.Timeout, state.GetSeqNo(), target.Addr))
 					} else {
 						sendBatch.Queue(SendPing(ipv6conn, bt.config.Timeout, state.GetSeqNo(), target.Addr))
@@ -177,7 +177,6 @@ func RecvPings(bt *Pingbeat, state *PingState, conn *icmp.PacketConn) {
 		binary := make([]byte, 1500)
 		n, peer, err := conn.ReadFrom(binary)
 		if err != nil {
-			binary = nil
 			logp.Err("Couldn't read from connection: %v", err)
 			continue
 		}
@@ -297,13 +296,12 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 		// Send the request and if successful, set a read deadline for the connection
 		if _, err := conn.WriteTo(binary, addr); err != nil {
 			return ping, err
-		} else {
-			if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-				return ping, err
-			}
-			ping.Sent = time.Now().UTC()
-			return ping, nil
 		}
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return ping, err
+		}
+		ping.Sent = time.Now().UTC()
+		return ping, nil
 	}
 }
 
@@ -360,9 +358,8 @@ func createConn(n string, a string) (*icmp.PacketConn, error) {
 	c, err := icmp.ListenPacket(n, a)
 	if err != nil {
 		return nil, err
-	} else {
-		return c, nil
 	}
+	return c, nil
 }
 
 // milliSeconds converts seconds to milliseconds
