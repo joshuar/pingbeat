@@ -214,32 +214,40 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			d := message.Body.(*icmp.TimeExceeded).Data
 			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
 			ICMPHdr := d[IPheader.Len:]
-			var p uint16
-			err := binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &p)
+			var thisID, thisSeq uint16
+			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
 			if err != nil {
-				logp.Debug("RecvPings", "Failed to parse TimeExceeded header:", err)
-			} else {
-				ping.ID = int(p)
-				ping.Target = IPheader.Dst.String()
-				ping.Loss = true
-				ping.LossReason = "Time Exceeded"
-				logp.Debug("RecvPings", "Time exceeded %v", ping.Target)
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
 			}
+			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
+			if err != nil {
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
+			}
+			ping.Seq = int(thisSeq)
+			ping.ID = int(thisID)
+			ping.Target = IPheader.Dst.String()
+			ping.Loss = true
+			ping.LossReason = "Time Exceeded"
+			logp.Warn("Time exceeded %v", ping.Target)
 		case *icmp.PacketTooBig:
 			d := message.Body.(*icmp.PacketTooBig).Data
 			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
 			ICMPHdr := d[IPheader.Len:]
-			var p uint16
-			err := binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &p)
+			var thisID, thisSeq uint16
+			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
 			if err != nil {
-				logp.Debug("RecvPings", "Failed to parse PacketTooBig header:", err)
-			} else {
-				ping.ID = int(p)
-				ping.Target = IPheader.Dst.String()
-				ping.Loss = true
-				ping.LossReason = "Packet Too Big"
-				logp.Debug("RecvPings", "Packet too big %v", ping.Target)
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
 			}
+			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
+			if err != nil {
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
+			}
+			ping.Seq = int(thisSeq)
+			ping.ID = int(thisID)
+			ping.Target = IPheader.Dst.String()
+			ping.Loss = true
+			ping.LossReason = "Packet Too Big"
+			logp.Warn("Packet too big %v", ping.Target)
 		case *icmp.DstUnreach:
 			d := message.Body.(*icmp.DstUnreach).Data
 			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
@@ -247,18 +255,18 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			var thisID, thisSeq uint16
 			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
 			if err != nil {
-				logp.Warn("RecvPings", "Failed to parse DstUnreach header:", err)
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
 			}
 			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
 			if err != nil {
-				logp.Warn("RecvPings", "Failed to parse DstUnreach header:", err)
+				logp.Err("RecvPings", "Failed to parse packet header:", err)
 			}
 			ping.Seq = int(thisSeq)
 			ping.ID = int(thisID)
 			ping.Target = IPheader.Dst.String()
 			ping.Loss = true
 			ping.LossReason = "Destination Unreachable"
-			logp.Debug("RecvPings", "Destination unreachable %v", ping.Target)
+			logp.Warn("Destination unreachable %v", ping.Target)
 		case *icmp.Echo:
 			ping.Seq = message.Body.(*icmp.Echo).Seq
 			ping.ID = message.Body.(*icmp.Echo).ID
