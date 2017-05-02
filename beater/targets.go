@@ -30,12 +30,12 @@ func NewTargets(cfg []*common.Config, privileged bool, ipv4 bool, ipv6 bool) map
 		target := &targetConfig{}
 		err := c.Unpack(target)
 		if err != nil {
-			logp.Err("Error reading target config: %v", err)
+			logp.Critical("Error reading target config: %v", err)
 		} else {
 			work := t.Queue(AddTarget(target, privileged, ipv4, ipv6))
 			work.Wait()
 			if err := work.Error(); err != nil {
-				logp.Err("Failed to add target %v!", work.Value().(*Target).Name)
+				logp.Err("Failed to add target %v: %v", work.Value().(*Target).Name, work.Error())
 			} else {
 				thisTarget := work.Value().(*Target)
 				if thisTarget.Addr != nil {

@@ -13,7 +13,7 @@ pingbeat:
   timeout: 10s
   targets:
     - name: "127.0.0.1"
-      tag: "localhost"
+      tags: "localhost"
       desc: "there's no place like home"
 
 #================================ General =====================================
