@@ -8,7 +8,7 @@ import (
 	"gopkg.in/go-playground/pool.v3"
 )
 
-// PingRecord is a is used to hold when a EchoRequest was sent to a target
+// PingRecord is used to hold when a EchoRequest was sent to a target
 type PingRecord struct {
 	Target string
 	Sent   time.Time
@@ -22,12 +22,15 @@ func NewPingRecord(target string) *PingRecord {
 	}
 }
 
+// PingState is used to keep track of active EchoRequests
 type PingState struct {
-	MU    sync.RWMutex
-	Pings map[int]*PingRecord
-	SeqNo int
+	MU      sync.RWMutex
+	Pings   map[int]*PingRecord
+	SeqNo   int
+	Timeout time.Duration
 }
 
+// NewPingState initialises the PingState struct
 func NewPingState() *PingState {
 	return &PingState{
 		SeqNo: 0,
@@ -35,6 +38,7 @@ func NewPingState() *PingState {
 	}
 }
 
+// GetSeqNo generates a new unique sequence number for an EchoRequest
 func (p *PingState) GetSeqNo() int {
 	s := p.SeqNo
 	p.SeqNo++
@@ -46,6 +50,7 @@ func (p *PingState) GetSeqNo() int {
 	return s
 }
 
+// AddPing adds a new request to PingState
 func (p *PingState) AddPing(target string, seq int, sent time.Time) bool {
 	p.MU.Lock()
 	p.Pings[seq] = &PingRecord{
@@ -56,6 +61,7 @@ func (p *PingState) AddPing(target string, seq int, sent time.Time) bool {
 	return true
 }
 
+// DelPing removes a request from PingState
 func (p *PingState) DelPing(seq int) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		if wu.IsCancelled() {
@@ -69,6 +75,7 @@ func (p *PingState) DelPing(seq int) pool.WorkFunc {
 	}
 }
 
+// CalcPingRTT calculates the time since a request was sent, e.g., the RTT
 func (p *PingState) CalcPingRTT(seq int, received time.Time) time.Duration {
 	p.MU.RLock()
 	defer p.MU.RUnlock()
@@ -79,13 +86,14 @@ func (p *PingState) CalcPingRTT(seq int, received time.Time) time.Duration {
 	return 0
 }
 
-func (p *PingState) CleanPings(bt *Pingbeat) {
+// CleanPings reaps requests in PingState that have timed out (i.e., no response
+// received before Pingbeat global timeout)
+func (p *PingState) CleanPings(timeout time.Duration) {
 	p.MU.Lock()
 	defer p.MU.Unlock()
 	for seq, details := range p.Pings {
-		if p.Pings[seq].Sent.Add(bt.config.Timeout).Before(time.Now()) {
-			go bt.ProcessError(p.Pings[seq].Target, "Timed out")
-			logp.Debug("pingstate", "CleanPings: Removing Packet (Seq ID: %v) for %v", seq, details.Target)
+		if p.Pings[seq].Sent.Add(timeout).Before(time.Now()) {
+			logp.Debug("pingstate", "CleanPings: Removing timed out packet (Seq ID: %v) for %v", seq, details.Target)
 			delete(p.Pings, seq)
 		}
 	}

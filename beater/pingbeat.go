@@ -20,6 +20,8 @@ import (
 	"gopkg.in/go-playground/pool.v3"
 )
 
+const pingTimeout = 60 * time.Second
+
 // Pingbeat contains configuration details
 type Pingbeat struct {
 	done        chan struct{}
@@ -71,19 +73,22 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 	return bt, nil
 }
 
+// Run is the main loop which sends/recieves ICMP messages and cleans up stale
+// requests
 func (bt *Pingbeat) Run(b *beat.Beat) error {
 	logp.Info("pingbeat is running! Hit CTRL-C to stop it.")
 
 	bt.client = b.Publisher.Connect()
 
 	// Set up send/receive pools
-	spool := pool.NewLimited(uint(len(bt.targets)) * uint(bt.config.Timeout.Seconds()))
+	// spool := pool.NewLimited(uint(len(bt.targets)) * uint(pingTimeout.Seconds()))
+	spool := pool.New()
 	defer spool.Close()
 
 	// Set up a ticker to loop for the period specified
 	ticker := time.NewTicker(bt.config.Period)
 	defer ticker.Stop()
-	timeout := time.NewTicker(bt.config.Timeout)
+	timeout := time.NewTicker(pingTimeout)
 	defer timeout.Stop()
 
 	// Create a new global state to track active ping requests
@@ -119,16 +124,16 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 		case <-timeout.C:
 			// Timeout reached, clean up any pending ping requests where there
 			// has been no response
-			go state.CleanPings(bt)
+			go state.CleanPings(pingTimeout)
 		case <-ticker.C:
 			// Batch queue echo request
 			sendBatch := spool.Batch()
 			go func(*icmp.PacketConn, *icmp.PacketConn) {
 				for ip, target := range bt.targets {
 					if net.ParseIP(ip).To4() != nil {
-						sendBatch.Queue(SendPing(ipv4conn, bt.config.Timeout, state.GetSeqNo(), target.Addr))
+						sendBatch.Queue(SendPing(ipv4conn, pingTimeout, state.GetSeqNo(), target.Addr))
 					} else {
-						sendBatch.Queue(SendPing(ipv6conn, bt.config.Timeout, state.GetSeqNo(), target.Addr))
+						sendBatch.Queue(SendPing(ipv6conn, pingTimeout, state.GetSeqNo(), target.Addr))
 					}
 				}
 				sendBatch.QueueComplete()
@@ -144,7 +149,6 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 				info := result.Value().(*PingInfo)
 				if err := result.Error(); err != nil {
 					logp.Debug("pingbeat", "Send unsuccessful: %v", err)
-					// bt.ProcessError(info.Target, "Send failed")
 				}
 				success := state.AddPing(info.Target, info.Seq, info.Sent)
 				if !success {
@@ -207,87 +211,54 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			continue
 		}
 
-		ping := &PingInfo{}
+		ping := PingInfo{}
+		var d []byte
 		// Switch for the ICMP message type
 		switch message.Body.(type) {
-		case *icmp.TimeExceeded:
-			d := message.Body.(*icmp.TimeExceeded).Data
-			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ICMPHdr := d[IPheader.Len:]
-			var thisID, thisSeq uint16
-			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			ping.Seq = int(thisSeq)
-			ping.ID = int(thisID)
-			ping.Target = IPheader.Dst.String()
-			ping.Loss = true
-			ping.LossReason = "Time Exceeded"
-			logp.Warn("Time exceeded %v", ping.Target)
-		case *icmp.PacketTooBig:
-			d := message.Body.(*icmp.PacketTooBig).Data
-			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ICMPHdr := d[IPheader.Len:]
-			var thisID, thisSeq uint16
-			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			ping.Seq = int(thisSeq)
-			ping.ID = int(thisID)
-			ping.Target = IPheader.Dst.String()
-			ping.Loss = true
-			ping.LossReason = "Packet Too Big"
-			logp.Warn("Packet too big %v", ping.Target)
-		case *icmp.DstUnreach:
-			d := message.Body.(*icmp.DstUnreach).Data
-			IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
-			ICMPHdr := d[IPheader.Len:]
-			var thisID, thisSeq uint16
-			err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
-			if err != nil {
-				logp.Err("RecvPings", "Failed to parse packet header:", err)
-			}
-			ping.Seq = int(thisSeq)
-			ping.ID = int(thisID)
-			ping.Target = IPheader.Dst.String()
-			ping.Loss = true
-			ping.LossReason = "Destination Unreachable"
-			logp.Warn("Destination unreachable %v", ping.Target)
 		case *icmp.Echo:
 			ping.Seq = message.Body.(*icmp.Echo).Seq
 			ping.ID = message.Body.(*icmp.Echo).ID
 			ping.Target = target
 			ping.Loss = false
 			ping.Received = time.Now().UTC()
+		case *icmp.TimeExceeded:
+			ping.Loss = true
+			d = message.Body.(*icmp.TimeExceeded).Data
+			ping.LossReason = "Time Exceeded"
+		case *icmp.PacketTooBig:
+			ping.Loss = true
+			d = message.Body.(*icmp.PacketTooBig).Data
+			ping.LossReason = "Packet Too Big"
+		case *icmp.DstUnreach:
+			ping.Loss = true
+			d = message.Body.(*icmp.DstUnreach).Data
+			ping.LossReason = "Destination Unreachable"
 		default:
-			// err := errors.New("Unknown ICMP Packet")
 		}
 		if ping.ID != 0 && ping.ID != myID {
 			logp.Debug("RecvPings", "Ping response from %v not from me:", target)
 		} else {
-			if ping.Loss {
-				go bt.ProcessError(ping.Target, ping.LossReason)
-				state.DelPing(ping.Seq)
-			}
 			if !ping.Loss {
 				ping.RTT = state.CalcPingRTT(ping.Seq, ping.Received)
-				go bt.ProcessPing(ping)
-				state.DelPing(ping.Seq)
+			} else {
+				IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
+				ICMPHdr := d[IPheader.Len:]
+				var thisID, thisSeq uint16
+				err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
+				if err != nil {
+					logp.Err("RecvPings", "Failed to parse packet header:", err)
+				}
+				err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
+				if err != nil {
+					logp.Err("RecvPings", "Failed to parse packet header:", err)
+				}
+				ping.Seq = int(thisSeq)
+				ping.ID = int(thisID)
+				ping.Target = IPheader.Dst.String()
+				logp.Warn("%v: %v", ping.LossReason, ping.Target)
 			}
+			go bt.ProcessPing(ping)
+			state.DelPing(ping.Seq)
 		}
 	}
 }
@@ -355,55 +326,38 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 	}
 }
 
-// FetchDetails takes a address as a string and returns the name and tag
-// associated with that address in the Pingbeat struct
-func (bt *Pingbeat) FetchDetails(t string) (string, []string) {
-	if _, found := bt.targets[t]; found {
-		return bt.targets[t].Name, bt.targets[t].Tags
-	} else {
-		logp.Err("Error: %s not found in Pingbeat targets!", t)
-		return "", nil
-	}
-}
-
 // ProcessPing fetches the details of this ping from the current state
 // and then creates an ping event to be published
-func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
-	name, tags := bt.FetchDetails(ping.Target)
-	if name == "" {
+func (bt *Pingbeat) ProcessPing(ping PingInfo) {
+	if _, found := bt.targets[ping.Target]; !found {
 		logp.Err("No details for %v in targets!", ping.Target)
 	} else {
-		event := common.MapStr{
-			"@timestamp":  common.Time(time.Now().UTC()),
-			"type":        "pingbeat",
-			"target.name": name,
-			"target.addr": ping.Target,
-			"target.tags": tags,
-			"rtt":         milliSeconds(ping.RTT),
+		name := bt.targets[ping.Target].Name
+		tags := bt.targets[ping.Target].Tags
+		if ping.Loss {
+			event := common.MapStr{
+				"@timestamp":  common.Time(time.Now().UTC()),
+				"type":        "pingbeat",
+				"target.name": name,
+				"target.addr": ping.Target,
+				"target.tags": tags,
+				"loss":        true,
+				"reason":      ping.LossReason,
+			}
+			go bt.client.PublishEvent(event)
+			logp.Debug("ProcessPing", "Processed ping error for %v (%v): %v", name, ping.Target, ping.LossReason)
+		} else {
+			event := common.MapStr{
+				"@timestamp":  common.Time(time.Now().UTC()),
+				"type":        "pingbeat",
+				"target.name": name,
+				"target.addr": ping.Target,
+				"target.tags": tags,
+				"rtt":         milliSeconds(ping.RTT),
+			}
+			go bt.client.PublishEvent(event)
+			logp.Debug("ProcessPing", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
 		}
-		logp.Debug("ProcessPing", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
-		bt.client.PublishEvent(event)
-	}
-}
-
-// ProcessError fetches details of this ping from the current state
-// and then creates an error event to be published
-func (bt *Pingbeat) ProcessError(target string, error string) {
-	name, tags := bt.FetchDetails(target)
-	if name == "" {
-		logp.Err("No details for %v in targets!", target)
-	} else {
-		event := common.MapStr{
-			"@timestamp":  common.Time(time.Now().UTC()),
-			"type":        "pingbeat",
-			"target.name": name,
-			"target.addr": target,
-			"target.tags": tags,
-			"loss":        true,
-			"reason":      error,
-		}
-		logp.Debug("ProcessPing", "Processed ping error for %v (%v): %v", name, target, error)
-		bt.client.PublishEvent(event)
 	}
 }
 
