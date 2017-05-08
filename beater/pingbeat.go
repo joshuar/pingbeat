@@ -81,8 +81,7 @@ func (bt *Pingbeat) Run(b *beat.Beat) error {
 	bt.client = b.Publisher.Connect()
 
 	// Set up send/receive pools
-	// spool := pool.NewLimited(uint(len(bt.targets)) * uint(pingTimeout.Seconds()))
-	spool := pool.New()
+	spool := pool.NewLimited(uint(len(bt.targets)) * uint(pingTimeout.Seconds()))
 	defer spool.Close()
 
 	// Set up a ticker to loop for the period specified
@@ -211,8 +210,7 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			continue
 		}
 
-		ping := PingInfo{}
-		var d []byte
+		ping := &PingInfo{}
 		// Switch for the ICMP message type
 		switch message.Body.(type) {
 		case *icmp.Echo:
@@ -223,16 +221,19 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			ping.Received = time.Now().UTC()
 		case *icmp.TimeExceeded:
 			ping.Loss = true
-			d = message.Body.(*icmp.TimeExceeded).Data
 			ping.LossReason = "Time Exceeded"
+			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.TimeExceeded).Data)
+			ping.Target = target
 		case *icmp.PacketTooBig:
 			ping.Loss = true
-			d = message.Body.(*icmp.PacketTooBig).Data
 			ping.LossReason = "Packet Too Big"
+			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.PacketTooBig).Data)
+			ping.Target = target
 		case *icmp.DstUnreach:
 			ping.Loss = true
-			d = message.Body.(*icmp.DstUnreach).Data
 			ping.LossReason = "Destination Unreachable"
+			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.DstUnreach).Data)
+			ping.Target = target
 		default:
 		}
 		if ping.ID != 0 && ping.ID != myID {
@@ -241,20 +242,6 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 			if !ping.Loss {
 				ping.RTT = state.CalcPingRTT(ping.Seq, ping.Received)
 			} else {
-				IPheader, _ := ipv4.ParseHeader(d[:len(d)-8])
-				ICMPHdr := d[IPheader.Len:]
-				var thisID, thisSeq uint16
-				err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &thisSeq)
-				if err != nil {
-					logp.Err("RecvPings", "Failed to parse packet header:", err)
-				}
-				err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &thisID)
-				if err != nil {
-					logp.Err("RecvPings", "Failed to parse packet header:", err)
-				}
-				ping.Seq = int(thisSeq)
-				ping.ID = int(thisID)
-				ping.Target = IPheader.Dst.String()
 				logp.Warn("%v: %v", ping.LossReason, ping.Target)
 			}
 			go bt.ProcessPing(ping)
@@ -328,7 +315,7 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 
 // ProcessPing fetches the details of this ping from the current state
 // and then creates an ping event to be published
-func (bt *Pingbeat) ProcessPing(ping PingInfo) {
+func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 	if _, found := bt.targets[ping.Target]; !found {
 		logp.Err("No details for %v in targets!", ping.Target)
 	} else {
@@ -361,7 +348,21 @@ func (bt *Pingbeat) ProcessPing(ping PingInfo) {
 	}
 }
 
-// createConn starts a new connection listing for pings
+func parseICMPError(data []byte) (int, int) {
+	IPheader, _ := ipv4.ParseHeader(data[:len(data)-8])
+	ICMPHdr := data[IPheader.Len:]
+	var ID, Seq uint16
+	err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &Seq)
+	if err != nil {
+		logp.Err("parseICMPError", "Failed to parse packet header:", err)
+	}
+	err = binary.Read(bytes.NewReader(ICMPHdr[4:6]), binary.BigEndian, &ID)
+	if err != nil {
+		logp.Err("parseICMPError", "Failed to parse packet header:", err)
+	}
+	return int(ID), int(Seq)
+}
+
 func createConn(n string, a string) (*icmp.PacketConn, error) {
 	c, err := icmp.ListenPacket(n, a)
 	if err != nil {
@@ -370,7 +371,6 @@ func createConn(n string, a string) (*icmp.PacketConn, error) {
 	return c, nil
 }
 
-// milliSeconds converts seconds to milliseconds
 func milliSeconds(d time.Duration) float64 {
 	msec := d / time.Millisecond
 	nsec := d % time.Millisecond
