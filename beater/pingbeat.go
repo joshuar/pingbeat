@@ -20,7 +20,7 @@ import (
 	"gopkg.in/go-playground/pool.v3"
 )
 
-const pingTimeout = 60 * time.Second
+const pingTimeout = 4 * time.Second
 
 // Pingbeat contains configuration details
 type Pingbeat struct {
@@ -222,18 +222,15 @@ func RecvPings(myID int, bt *Pingbeat, state *PingState, conn *icmp.PacketConn) 
 		case *icmp.TimeExceeded:
 			ping.Loss = true
 			ping.LossReason = "Time Exceeded"
-			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.TimeExceeded).Data)
-			ping.Target = target
+			ping.ID, ping.Seq, ping.Target = parseICMPError(message.Body.(*icmp.TimeExceeded).Data)
 		case *icmp.PacketTooBig:
 			ping.Loss = true
 			ping.LossReason = "Packet Too Big"
-			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.PacketTooBig).Data)
-			ping.Target = target
+			ping.ID, ping.Seq, ping.Target = parseICMPError(message.Body.(*icmp.PacketTooBig).Data)
 		case *icmp.DstUnreach:
 			ping.Loss = true
 			ping.LossReason = "Destination Unreachable"
-			ping.ID, ping.Seq = parseICMPError(message.Body.(*icmp.DstUnreach).Data)
-			ping.Target = target
+			ping.ID, ping.Seq, ping.Target = parseICMPError(message.Body.(*icmp.DstUnreach).Data)
 		default:
 		}
 		if ping.ID != 0 && ping.ID != myID {
@@ -348,7 +345,7 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 	}
 }
 
-func parseICMPError(data []byte) (int, int) {
+func parseICMPError(data []byte) (int, int, string) {
 	IPheader, _ := ipv4.ParseHeader(data[:len(data)-8])
 	ICMPHdr := data[IPheader.Len:]
 	var ID, Seq uint16
@@ -360,7 +357,7 @@ func parseICMPError(data []byte) (int, int) {
 	if err != nil {
 		logp.Err("parseICMPError", "Failed to parse packet header:", err)
 	}
-	return int(ID), int(Seq)
+	return int(ID), int(Seq), IPheader.Dst.String()
 }
 
 func createConn(n string, a string) (*icmp.PacketConn, error) {
