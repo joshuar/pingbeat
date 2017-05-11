@@ -298,11 +298,8 @@ func SendPing(conn *icmp.PacketConn, timeout time.Duration, seq int, addr net.Ad
 			Seq:    seq,
 			Target: t,
 		}
-		// Send the request and if successful, set a read deadline for the connection
+		// Send the request
 		if _, err := conn.WriteTo(binary, addr); err != nil {
-			return ping, err
-		}
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 			return ping, err
 		}
 		ping.Sent = time.Now().UTC()
@@ -346,10 +343,13 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 }
 
 func parseICMPError(data []byte) (int, int, string) {
-	IPheader, _ := ipv4.ParseHeader(data[:len(data)-8])
+	IPheader, err := ipv4.ParseHeader(data[:len(data)-8])
+	if err != nil {
+		logp.Err("parseICMPError", "Failed to parse packet header:", err)
+	}
 	ICMPHdr := data[IPheader.Len:]
 	var ID, Seq uint16
-	err := binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &Seq)
+	err = binary.Read(bytes.NewReader(ICMPHdr[6:8]), binary.BigEndian, &Seq)
 	if err != nil {
 		logp.Err("parseICMPError", "Failed to parse packet header:", err)
 	}
