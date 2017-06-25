@@ -164,6 +164,53 @@ Long, free form text describing this particular target
 
 
 [float]
+== geoip Fields
+
+Contains GeoIP information gathered based on the `target.addr` field. Only present if the GeoIP Elasticsearch plugin is available and used.
+
+
+
+[float]
+=== geoip.continent_name
+
+type: keyword
+
+The name of the continent.
+
+
+[float]
+=== geoip.city_name
+
+type: keyword
+
+The name of the city.
+
+
+[float]
+=== geoip.region_name
+
+type: keyword
+
+The name of the region.
+
+
+[float]
+=== geoip.country_iso_code
+
+type: keyword
+
+Country ISO code.
+
+
+[float]
+=== geoip.location
+
+type: geo_point
+
+The longitude and latitude.
+
+
+[float]
 === rtt
 
 type: double

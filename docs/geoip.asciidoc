@@ -1,0 +1,46 @@
+[[pingbeat-geoip]]
+== Geoip Enrichment
+
+You can configure geoip enrichment of Pingbeat data using the https://www.elastic.co/guide/en/elasticsearch/plugins/current/ingest-geoip.html[ingest-geoip]
+Elasticsearch plugin.
+
+After installing the plugin, use a ingest pipeline as follows:
+
+[source, json]
+-------------------------------------
+PUT _ingest/pipeline/pingbeat_geoip
+{
+  "description": "Pipeline for performing geoip enrichment of pingbeat targets",
+  "on_failure": [
+    {
+      "set": {
+        "field": "error",
+        "value": "{{ _ingest.on_failure_message }}"
+      }
+    }
+  ],
+  "processors": [
+    {
+      "geoip": {
+        "field": "target.addr",
+        "target_field": "geoip"
+      }
+    }
+  ]
+}
+-------------------------------------
+
+Then, configure your Elasticsearch output in pingbeat.yml to use this pipeline:
+
+[source, yaml]
+-------------------------------------
+output.elasticsearch:
+  # Array of hosts to connect to.
+  hosts: ["localhost:9200"]
+  pipeline: pingbeat_geoip
+  # Optional protocol and basic auth credentials.
+  #protocol: "https"
+  #username: "elastic"
+  #password: "changeme"
+
+-------------------------------------
