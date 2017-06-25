@@ -317,24 +317,28 @@ func (bt *Pingbeat) ProcessPing(ping *PingInfo) {
 		tags := bt.targets[ping.Target].Tags
 		if ping.Loss {
 			event := common.MapStr{
-				"@timestamp":  common.Time(time.Now().UTC()),
-				"type":        "pingbeat",
-				"target.name": name,
-				"target.addr": ping.Target,
-				"target.tags": tags,
-				"loss":        true,
-				"reason":      ping.LossReason,
+				"@timestamp": common.Time(time.Now().UTC()),
+				"type":       "pingbeat",
+				"target": common.MapStr{
+					"name": name,
+					"addr": ping.Target,
+					"tags": tags,
+				},
+				"loss":   true,
+				"reason": ping.LossReason,
 			}
 			go bt.client.PublishEvent(event)
 			logp.Debug("ProcessPing", "Processed ping error for %v (%v): %v", name, ping.Target, ping.LossReason)
 		} else {
 			event := common.MapStr{
-				"@timestamp":  common.Time(time.Now().UTC()),
-				"type":        "pingbeat",
-				"target.name": name,
-				"target.addr": ping.Target,
-				"target.tags": tags,
-				"rtt":         milliSeconds(ping.RTT),
+				"@timestamp": common.Time(time.Now().UTC()),
+				"type":       "pingbeat",
+				"target": common.MapStr{
+					"name": name,
+					"addr": ping.Target,
+					"tags": tags,
+				},
+				"rtt": milliSeconds(ping.RTT),
 			}
 			go bt.client.PublishEvent(event)
 			logp.Debug("ProcessPing", "Processed ping %v for %v (%v): %v", ping.Seq, name, ping.Target, ping.RTT)
