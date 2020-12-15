@@ -1,3 +1,8 @@
+
+# DEPRECATED 
+[![No Maintenance Intended](http://unmaintained.tech/badge.svg)](http://unmaintained.tech/) This project is unmaintained and abandoned.  Check out [Heartbeat](https://www.elastic.co/beats/heartbeat) instead.
+
+
 pingbeat
 ========
 
